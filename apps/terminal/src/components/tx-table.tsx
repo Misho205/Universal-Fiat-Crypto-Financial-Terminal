@@ -8,9 +8,9 @@ import { TableWrap, Td, Th } from "./ui/table";
 
 export interface TxItem { kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }
 
-export function TxTable({ items, modal, isAdmin, locale, onChanged }: {
+export function TxTable({ items, modal, isAdmin, locale, onChanged, onView }: {
   items: TxItem[]; modal: ModalBackendClient; isAdmin: boolean; locale: "bg" | "en";
-  onChanged: () => void;
+  onChanged: () => void; onView?: (item: TxItem) => void;
 }) {
   const [confirm, setConfirm] = React.useState<null | { paymentId: string; action: "cancel" | "refund" }>(null);
   const [err, setErr] = React.useState("");
@@ -44,6 +44,10 @@ export function TxTable({ items, modal, isAdmin, locale, onChanged }: {
               <Td><StatusBadge state={i.state} /></Td>
               <Td className="max-w-64 truncate" title={i.detail}>{i.detail}</Td>
               <Td>
+                {onView && (
+                  <button onClick={() => onView(i)}
+                    className="mr-1 rounded-lg border border-line px-2 py-1 text-xs font-semibold">View</button>
+                )}
                 {i.kind === "fiat" && isAdmin && (i.state === "pending" || i.state === "unknown") && (
                   <button disabled={busy} onClick={() => setConfirm({ paymentId: i.id, action: "cancel" })}
                     className="mr-1 rounded-lg border border-line px-2 py-1 text-xs font-semibold">Cancel</button>

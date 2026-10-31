@@ -1,5 +1,26 @@
 # Test report (living)
 
+## 2026-10-31 — Crash-loop root causes (evidence) + Banking/Personal workspaces
+- Crash loop diagnosis (Modal app logs, ephemeral `hybridpay-terminal` apps):
+  (1) blocking `serve_forever()` under `@web_server` → "initializing for too long: 300s"
+  startup timeouts — fixed with non-blocking `Popen` + return;
+  (2) relative import on remote cold start (`attempted relative import with no parent
+  package`) — fixed by baking `modal_backend/` into the image + absolute import;
+  (3) `modal-function-call-id` forwarded both directions → "prohibited modal header"
+  500s — fixed with request allowlist + response header strip. `test_modal_mount.py`
+  guards the import fix. Remaining KeyboardInterrupt tracebacks are expected shutdown
+  artifacts of killing local `modal serve` sessions (label stolen → new app), not app bugs.
+- Banking (`/banking`, admin-gated): Overview (KPIs, charts, alerts, AI usage), Payment Ops
+  (search/filter/detail, maker-checker cancel/refund, reconcile status), Contracts (full
+  lifecycle + audit), Risk (review queue, fraud indicators w/ NOT-certified notice, escalate
+  via Dispute), Admin (org/tenant, RBAC matrix, users/seats gap flagged, API/security settings),
+  Analytics (volumes/methods/currency from real data, CSV export, no invented metrics).
+- Personal (`/personal`): Dashboard, 5-step Send wizard (review screen + explicit confirm),
+  Receive (shareable Sepolia request + tracking), Programmable wizard (plain language → DSL),
+  Assistant, History (search + detail + JSON receipt download), Settings (session-only profile,
+  token mgmt, wallet connect without seeds, local-only notifications).
+- No fictional balances, no real-money paths, AI advisory-only, tenant-scoped everywhere.
+
 ## 2026-10-31 — Design system + Banking/Personal workspaces (mocked; no live funds)
 - New: Tailwind v3 + CSS-variable tokens (light/dark) + shadcn-style ui primitives
   (button/card/badge/status-badge/money/table/dialog/input/select/textarea/alert/

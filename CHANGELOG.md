@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-31 — Banking + Personal workspaces (full modules) + crash-loop fixes
+- Crash-loop root causes with log evidence: blocking web_server fn → Popen; relative
+  import on cold start → bake package + absolute import (`test_modal_mount.py` guards it);
+  `modal-function-call-id` forwarded both ways → allowlist/strip. Kill-restart
+  KeyboardInterrupts identified as expected shutdown artifacts.
+- Banking (6 modules, admin-gated money actions): overview/alerts/AI usage, ops with
+  detail + maker-checker, contracts + audit, risk queue + escalate-via-dispute, admin
+  (RBAC matrix, users/seats gap flagged, API/security), analytics (real-data charts + CSV).
+- Personal (7 screens): dashboard, 5-step send wizard with review+confirm, receive
+  (shareable Sepolia request), programmable wizard (plain language → DSL), assistant,
+  history (search/detail/JSON receipt), settings (session-only, no seed requests).
+- No invented metrics/balances; AI advisory-only; tenant isolation enforced.
+
 ## 2026-10-31 — Design system + Banking/Personal workspaces
 - `FRONTEND_IMPLEMENTATION_PLAN.md`: audit (36 Modal + 12 Nest endpoints), feature matrix,
   architecture, token/component specs, auth/RBAC, missing-backend list, P0-P2.

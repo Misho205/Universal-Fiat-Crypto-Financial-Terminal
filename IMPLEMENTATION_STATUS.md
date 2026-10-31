@@ -31,7 +31,7 @@ Policy: no invented results — every claim below cites an executed command or a
 | Crypto testnet | ✅ implemented, partially tested | `crypto/simulate` + regtest validation, `test_modal_backend.py`; full regtest stack needs docker profile (not run) |
 | Programmable contracts | ✅ implemented + tested | `contracts.py` allowlist validator + `validate_terms` tests; on-chain contracts out of scope (see `docs/real-money-roadmap.md`) |
 | AI integration | ✅ implemented + tested | explain fiat/crypto, contract analysis, fraud (NOT certified), routing, state explainer, assistant (read-only, safe actions) + usage endpoint; mocked tests + opt-in live; `docs/ai-integration.md` |
-| Frontend | ✅ implemented + tested | dashboard + Banking/Personal workspaces + design-system showcase (`FRONTEND_IMPLEMENTATION_PLAN.md`), `demo-flow.test.ts` + `design-system.test.ts` (mocked), `i18n` parity, builds green |
+| Frontend | ✅ implemented + tested | Banking (6 modules: overview/ops/contracts/risk/admin/analytics, maker-checker) + Personal (7 screens: dash/send/receive/program/assistant/history/settings) + design system; mocked tests; builds green |
 | Database | ✅ implemented + tested | `db.py` SQLite durable (+ evm_payments, contract_agreements) + persist tests; Postgres remains system of record for Nest API |
 | Auth | ✅ implemented + tested | bearer + tenant guards, 401/400 paths tested, CORS allowlist tested |
 | Deploy | 🟡 code-ready, NOT deployed | `modal serve` verified locally; `modal deploy` is an operator step (no approval given) — see `docs/modal-deploy-checklist.md` |
