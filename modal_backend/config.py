@@ -42,6 +42,12 @@ BTCPAY_URL_TEST: str = _get("BTCPAY_URL_TEST", "")
 BTCPAY_API_KEY_TEST: str = _get("BTCPAY_API_KEY_TEST", "")
 BTCPAY_STORE_ID_TEST: str = _get("BTCPAY_STORE_ID_TEST", "")
 
+# EVM Sepolia testnet (read-only JSON-RPC for receipt verification; the backend
+# never signs — the user's wallet signs via the frontend).
+SEPOLIA_RPC_URL: str = _get("SEPOLIA_RPC_URL", "")
+SEPOLIA_CHAIN_ID: int = int(_get("SEPOLIA_CHAIN_ID", "11155111"))
+EVM_CONFIRMATIONS_REQUIRED: int = int(_get("EVM_CONFIRMATIONS_REQUIRED", "2"))
+
 MODAL_SECRET_NAME = "hybridpay-test"
 
 # LIVE gate: LIVE_MODE=true alone NEVER enables money movement. A signed

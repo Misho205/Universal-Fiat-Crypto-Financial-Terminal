@@ -9,13 +9,18 @@ for hackathon demos.
 > Technical receipt is NOT a fiscal receipt.
 
 ## What is here
-- **Terminal** (`apps/terminal`, Next.js, BG/EN): order/QR, fiat sandbox, crypto testnet, contract
-  validation, transaction status + advisory AI, visual **simulator** (`/simulator`) for human trial tests.
+- **Terminal** (`apps/terminal`, Next.js, BG/EN): order/QR, fiat sandbox, crypto testnet,
+  **EVM Sepolia** (wallet connect via viem, sign-in-wallet, receipt + explorer links),
+  **Agreements** (programmable fiat contracts: create/monitor/execute), contract validator,
+  transaction status + advisory AI, visual **simulator** (`/simulator`) for human trial tests.
 - **NestJS API** (`apps/api`): modular monolith, system of record (PostgreSQL + Prisma migrations).
 - **Worker** (`apps/worker`): Temporal activities/workflows (provider calls live outside DB tx).
 - **Modal backend** (`modal_backend/`, FastAPI): stateless sandbox executor + advisory AI —
   fiat sandbox payments E2E (`POST /api/payments/fiat` → `/confirm` → retrieve/cancel/refund),
-  HMAC-verified Stripe webhook, SQLite durability (`./data/hybridpay.db`), contract validator.
+  HMAC-verified Stripe webhook, **EVM Sepolia tracking** (`/api/payments/evm/*`: request/submit/
+  receipt/replace/list, mainnet refused), **programmable agreements** (`/api/contracts/programmable/*`:
+  create/activate/approve/evidence/execute/cancel/dispute with audit chain),
+  SQLite durability (`./data/hybridpay.db`), contract validator.
 - **Packages**: `domain` (exact money), `agreements` (DSL validator), `ledger` (balanced journal),
   `policies` (OPA), `adapters` (mock/Stripe-sandbox/BTCPay-regtest), `sdk` (typed browser client).
 

@@ -1,6 +1,16 @@
 # Changelog
 
-## 2026-10-31 — Modal startup verified + fiat sandbox E2E + project docs
+## 2026-10-31 — EVM Sepolia workflow + programmable fiat contracts
+- New: `modal_backend/evm.py` + `/api/payments/evm/*` (request/submit/receipt/replace/list;
+  Sepolia-only chain guard, receipt + confirmations via JSON-RPC, explorer links, chain != settlement).
+- New: `modal_backend/programmable.py` + `/api/contracts/programmable/*` (draft/active/
+  conditions_pending/eligible_for_execution/completed/canceled/expired/disputed; 4 condition
+  types; role-gated transitions; hash-chained audit; execute = eligibility AND human executor
+  AND sandbox fiat provider; escrow/custody claims rejected).
+- Frontend: viem wallet (sign-in-wallet, keys never leave), EVM Sepolia tab, Agreements tab.
+- Tests: `test_evm_payments.py` 6/1 skipped, `test_programmable_contracts.py` 5/5, SDK 6, terminal 5.
+- Docs: `docs/evm-sepolia.md` (setup/faucet/verification), `docs/programmable-contracts.md`.
+- Results: `pnpm build` 9/9, `pnpm test` 11/11, `pytest modal_backend/` all green. No deploy, no live funds.
 - Verified `modal serve modal_backend/app.py` starts clean (no traceback); hardened imports/config; secret `hybridpay-test` present.
 - New: `modal_backend/payments.py` (provider ABC + mock + Stripe TEST), `modal_backend/db.py` (SQLite durability),
   7 fiat endpoints + verified Stripe webhook in `modal_backend/api.py` (legacy `simulate` kept).

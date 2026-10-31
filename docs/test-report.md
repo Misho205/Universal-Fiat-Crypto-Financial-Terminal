@@ -11,6 +11,20 @@
 - Sandbox/regtest: BLOCKED (no credentials) — explicit, not claimed.
 - Perf/restore: to be measured in M5; targets recorded, not claimed.
 
+## 2026-10-31 — EVM Sepolia + programmable contracts (executed, mocked; no live funds)
+- `pytest modal_backend/test_evm_payments.py` 6 passed / 1 skipped (opt-in live RPC):
+  mainnet refusal, address/hash validation, request->submit->pending (no RPC configured),
+  receipt confirmed/failed via mocked JSON-RPC, replacement gating, idempotency/409,
+  expiry, tenant isolation, no-key handling asserted on source.
+- `pytest modal_backend/test_programmable_contracts.py` 5 passed: creation allowlist
+  (AI bypass + custody claims rejected), full lifecycle with roles + hash-chained audit,
+  all 4 condition types, dispute freeze, expiry block, evaluator units + tamper detection.
+- `pnpm --filter @hybridpay/sdk test` 6 passed (evm + programmable client cases, no key leakage).
+  `pnpm --filter @hybridpay/terminal test` 5 passed (incl. evm + programmable mocked E2E flows).
+- Full suite at push time: `pnpm build` 9/9, `pnpm test` 11/11, `pytest modal_backend/` all green.
+- Live Sepolia RPC + Stripe TEST network runs documented (`docs/evm-sepolia.md`,
+  `docs/fiat-sandbox.md`), not executed here (no key/URL provided).
+
 ## 2026-10-31 — Build + coverage hardening (executed 20:45 UTC)
 - `pnpm build`: 9/9 PASS (fixed terminal next.config.mjs TS-in-JS, worker moduleResolution Bundler-vs-CommonJS, worker import.meta under CommonJS, terminal missing root layout, adapters signature mismatches; removed `|| true` build silencers).
 - `pnpm test`: 10/10 suites PASS (domain 11 incl. property fuzz, agreements 8, ledger 7 incl. balance property, policies 4, adapters 3, terminal 1, worker 2, api 7 incl. integration flow, sdk 2 new).

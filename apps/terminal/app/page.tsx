@@ -2,13 +2,15 @@
 import { useMemo, useRef, useState } from "react";
 import { dict, type Locale } from "../src/i18n";
 import { HybridPayClient, ModalBackendClient, ApiError, friendlyError } from "@hybridpay/sdk";
+import EvmPanel from "../src/EvmPanel";
+import AgreementsPanel from "../src/AgreementsPanel";
 
 // Browser-safe config: only NEXT_PUBLIC_* (never secrets). Meta/provider keys stay in Modal Secrets.
 const NEST_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const MODAL_URL = process.env.NEXT_PUBLIC_MODAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const DEV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN ?? "";
 
-type Tab = "order" | "fiat" | "crypto" | "contract" | "status";
+type Tab = "order" | "fiat" | "crypto" | "contract" | "status" | "evm" | "agreements";
 type Outcome = { kind: "idle" } | { kind: "loading" } | { kind: "ok"; text: string } | { kind: "err"; text: string; retryable: boolean };
 
 function useIdempotency() {
@@ -142,9 +144,9 @@ export default function Home() {
       </div>
       <h1>HybridPay Terminal — {t.newOrder}</h1>
       <div>
-        {(["order", "fiat", "crypto", "contract", "status"] as Tab[]).map((k) => (
+        {(["order", "fiat", "crypto", "evm", "contract", "agreements", "status"] as Tab[]).map((k) => (
           <button key={k} style={{ ...btn, fontWeight: tab === k ? "bold" : "normal" }} onClick={() => setTab(k)}>
-            {k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "contract" ? t.tabContract : t.tabStatus}
+            {k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "evm" ? t.tabEvm : k === "contract" ? t.tabContract : k === "agreements" ? t.tabAgreements : t.tabStatus}
           </button>
         ))}
       </div>
@@ -185,6 +187,16 @@ export default function Home() {
         <label>{t.terms}:<br /><textarea style={{ width: "100%", height: 120 }} value={terms} onChange={(e) => setTerms(e.target.value)} /></label>
         <div><button style={btn} disabled={conBusy} onClick={submitContract}>{t.submitContract}</button></div>
         {renderOutcome(conOut)}
+      </section>)}
+
+      {tab === "evm" && (<section style={box}>
+        <h2>{t.tabEvm}</h2>
+        <EvmPanel modal={modal} locale={locale} />
+      </section>)}
+
+      {tab === "agreements" && (<section style={box}>
+        <h2>{t.tabAgreements}</h2>
+        <AgreementsPanel modal={modal} locale={locale} />
       </section>)}
 
       {tab === "status" && (<section style={box}>

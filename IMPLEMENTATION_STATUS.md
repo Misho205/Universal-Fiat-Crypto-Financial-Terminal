@@ -1,6 +1,6 @@
 # IMPLEMENTATION_STATUS.md — Universal Hybrid Payment Terminal
 
-Generated: 2026-10-31 (UTC). Scope: Modal startup fix + fiat sandbox E2E.
+Generated: 2026-10-31 (UTC). Scope: Modal startup fix + fiat sandbox E2E + EVM Sepolia + programmable contracts.
 Policy: no invented results — every claim below cites an executed command or a file.
 
 ## 1. Modal startup failure — reproduction & fix
@@ -30,21 +30,24 @@ Policy: no invented results — every claim below cites an executed command or a
 | Crypto testnet | ✅ implemented, partially tested | `crypto/simulate` + regtest validation, `test_modal_backend.py`; full regtest stack needs docker profile (not run) |
 | Programmable contracts | ✅ implemented + tested | `contracts.py` allowlist validator + `validate_terms` tests; on-chain contracts out of scope (see `docs/real-money-roadmap.md`) |
 | AI integration | ✅ implemented + tested (advisory only) | 5 AI endpoints, `advisoryOnly` asserted, `test_ai_endpoints_cannot_move_money`; live Meta call opt-in skipped (no key) |
-| Frontend | ✅ implemented + tested | dashboard tabs + simulator, `demo-flow.test.ts` E2E (mocked), `i18n` parity, builds green |
-| Database | ✅ implemented + tested | `db.py` SQLite durable + `test_records_persist_durably`; Postgres remains system of record for Nest API |
+| Frontend | ✅ implemented + tested | dashboard tabs incl. EVM Sepolia + Agreements + simulator, `demo-flow.test.ts` E2E (mocked), `i18n` parity, builds green |
+| Database | ✅ implemented + tested | `db.py` SQLite durable (+ evm_payments, contract_agreements) + persist tests; Postgres remains system of record for Nest API |
 | Auth | ✅ implemented + tested | bearer + tenant guards, 401/400 paths tested, CORS allowlist tested |
 | Deploy | 🟡 code-ready, NOT deployed | `modal serve` verified locally; `modal deploy` is an operator step (no approval given) — see `docs/modal-deploy-checklist.md` |
 
 ## 3. Implemented and verified (executed in this session)
 - `modal serve modal_backend/app.py` → Serving, no error.
-- `pnpm build` → 9/9 green. `pnpm test` → 11/11 suites green (sdk 4, terminal 3 incl. demo E2E).
-- `pytest modal_backend/` → 25 passed, 1 skipped (fiat 7 + live-gate 3 + backend 6 + meta 9).
+- `pnpm build` → 9/9 green. `pnpm test` → 11/11 suites green (sdk 6, terminal 5 incl. evm + programmable E2E).
+- `pytest modal_backend/` → all green incl. `test_evm_payments.py` (6 passed, 1 skipped opt-in live RPC)
+  and `test_programmable_contracts.py` (5 passed).
 - `node --test tests/property tests/integration` (explicit files) → 4/4.
 - `POST /api/payments/fiat/simulate` live local → 201 `AUTHORIZED`; `/health` → `liveMode OFF`.
 
 ## 4. Implemented but NOT live-tested (needs operator key/infra)
 - Stripe TEST network calls (`StripeTestProvider.create/confirm/retrieve`) — mocked path tested; real
   `sk_test_*` exchange documented in `docs/fiat-sandbox.md`, not executed (no key provided).
+- Sepolia live RPC receipt check — mocked JSON-RPC tested; read-only live run documented in
+  `docs/evm-sepolia.md`, not executed (no RPC URL / known tx provided).
 - BTCPay regtest stack (docker profile bitcoind + btcpay) — code ready, `SANDBOX_BLOCKED` without creds.
 - Meta model live call — skipped by design (`RUN_META_INTEGRATION` unset).
 - `modal deploy` — not run (explicitly withheld without approval).

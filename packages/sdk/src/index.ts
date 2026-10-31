@@ -134,6 +134,60 @@ export class ModalBackendClient {
       method: "POST", headers: this.headers(), body: JSON.stringify(amountMinor ? { amountMinor } : {}),
     });
   }
+  // --- EVM Sepolia testnet (wallet signs; backend tracks + verifies, never holds keys) ---
+  evmRequest(body: { to: string; valueWei: string; chainId?: number; expiresInSec?: number }, idempotencyKey: string) {
+    return this.request<{ paymentId: string; chainId: number; to: string; valueWei: string; state: string; explorerBase: string; sandbox: boolean }>(
+      "/api/payments/evm/request", {
+        method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify({ chainId: 11155111, ...body }),
+      });
+  }
+  evmSubmit(paymentId: string, txHash: string) {
+    return this.request<{ paymentId: string; state: string; txHash: string; explorer: string; sandbox: boolean }>(
+      `/api/payments/evm/${encodeURIComponent(paymentId)}/submit`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify({ txHash }),
+      });
+  }
+  evmStatus(paymentId: string) {
+    return this.request<{ paymentId: string; state: string; txHash: string; confirmations: number; confirmationsRequired: number; explorer: string | null; businessSettled: boolean; note: string; sandbox: boolean }>(
+      `/api/payments/evm/${encodeURIComponent(paymentId)}`, { headers: this.headers() });
+  }
+  evmList() {
+    return this.request<{ payments: { id: string; chainId: number; to: string; valueWei: string; state: string; txHash: string; confirmations: number; explorer: string | null }[]; chainId: number; sandbox: boolean }>(
+      "/api/payments/evm", { headers: this.headers() });
+  }
+  // --- programmable fiat agreements (deterministic, sandbox; never escrow) ---
+  pagCreate(terms: unknown, creator: string, idempotencyKey: string) {
+    return this.request<{ agreementId: string; version: number; state: string; disclosure: string; sandbox: boolean }>(
+      "/api/contracts/programmable", {
+        method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }),
+        body: JSON.stringify({ terms, creator }),
+      });
+  }
+  pagGet(agreementId: string) {
+    return this.request<{ agreementId: string; state: string; terms: unknown; evidence: unknown; conditionStatuses: Record<string, string>; eligible: boolean; chainValid: boolean; history: unknown[]; disclosure: string; sandbox: boolean }>(
+      `/api/contracts/programmable/${encodeURIComponent(agreementId)}`, { headers: this.headers() });
+  }
+  pagActivate(agreementId: string, actor: string, role: string) {
+    return this.request(`/api/contracts/programmable/${encodeURIComponent(agreementId)}/activate`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ actor, role }),
+    });
+  }
+  pagApprove(agreementId: string, actor: string, role: string) {
+    return this.request(`/api/contracts/programmable/${encodeURIComponent(agreementId)}/approve`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ actor, role }),
+    });
+  }
+  pagEvidence(agreementId: string, actor: string, evidence: unknown) {
+    return this.request(`/api/contracts/programmable/${encodeURIComponent(agreementId)}/evidence`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ actor, evidence }),
+    });
+  }
+  pagExecute(agreementId: string, actor: string, idempotencyKey: string) {
+    return this.request(`/api/contracts/programmable/${encodeURIComponent(agreementId)}/execute`, {
+      method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }),
+      body: JSON.stringify({ actor, role: "executor" }),
+    });
+  }
   cryptoSimulate(body: CryptoSimulateBody, idempotencyKey: string) {
     return this.request<TxStatus>("/api/payments/crypto/simulate", {
       method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),

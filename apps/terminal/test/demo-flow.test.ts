@@ -46,4 +46,33 @@ describe("hackathon demo flow", () => {
     const keys = fn.mock.calls.map((c) => (c[1] as RequestInit & { headers: Record<string, string> }).headers["Idempotency-Key"]);
     expect(keys).toEqual([stableKey, stableKey]);
   });
+  it("evm sepolia flow: request -> submit -> receipt (mocked, mainnet never used)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "POST /api/payments/evm/request": { status: 201, body: { paymentId: "evm-1", chainId: 11155111, state: "requested", sandbox: true } },
+      "POST /api/payments/evm/evm-1/submit": { status: 200, body: { paymentId: "evm-1", state: "pending", explorer: "https://sepolia.etherscan.io/tx/0x1" } },
+      "GET /api/payments/evm/evm-1": { status: 200, body: { paymentId: "evm-1", state: "confirmed", confirmations: 3, confirmationsRequired: 2, businessSettled: false } },
+    }));
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "t" });
+    const r = await modal.evmRequest({ to: `0x${"ab".repeat(20)}`, valueWei: "1000" }, "k");
+    expect(r.data.chainId).toBe(11155111);
+    const s = await modal.evmSubmit("evm-1", `0x${"11".repeat(32)}`);
+    expect(s.data.explorer).toMatch(/sepolia.etherscan.io/);
+    const g = await modal.evmStatus("evm-1");
+    expect(g.data.state).toBe("confirmed");
+    expect(g.data.businessSettled).toBe(false); // chain != settlement
+  });
+  it("programmable agreement flow: create -> get eligible -> execute (mocked)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "POST /api/contracts/programmable": { status: 201, body: { agreementId: "pag-1", state: "draft", sandbox: true } },
+      "GET /api/contracts/programmable/pag-1": { status: 200, body: { agreementId: "pag-1", state: "eligible_for_execution", eligible: true, chainValid: true } },
+      "POST /api/contracts/programmable/pag-1/execute": { status: 200, body: { agreementId: "pag-1", state: "completed", sandbox: true } },
+    }));
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "t" });
+    const c = await modal.pagCreate({ amountMinor: "100" }, "creator", "k");
+    expect(c.data.sandbox).toBe(true);
+    const g = await modal.pagGet("pag-1");
+    expect(g.data.eligible).toBe(true);
+    const ex = await modal.pagExecute("pag-1", "finance-op", "k-exec");
+    expect((ex.data as { state: string }).state).toBe("completed");
+  });
 });

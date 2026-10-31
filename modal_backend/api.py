@@ -31,8 +31,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import ai, config, contracts, meta_client, payments, providers, store
+from . import ai, config, contracts, meta_client, payments, programmable, providers, store
 from . import db as _db
+from . import evm as evm_mod
 from .auth import require_auth, require_tenant
 from .db import tx_get as db_tx_get, tx_list as db_tx_list, tx_upsert as db_tx_upsert
 from .logging_util import get_logger, log_event
@@ -81,6 +82,36 @@ class FiatCreateIn(BaseModel):
 
 class FiatRefundIn(BaseModel):
     amountMinor: str | None = Field(default=None, pattern=r"^\d+$", max_length=12)
+
+
+class EvmRequestIn(BaseModel):
+    to: str = Field(min_length=42, max_length=42)
+    valueWei: str = Field(pattern=r"^\d+$", max_length=32)
+    chainId: int = Field(default=11155111)
+    expiresInSec: int = Field(default=3600, ge=60, le=86400)
+
+
+class EvmSubmitIn(BaseModel):
+    txHash: str = Field(min_length=66, max_length=66)
+
+
+class EvmReplaceIn(BaseModel):
+    newTxHash: str = Field(min_length=66, max_length=66)
+
+
+class PagCreateIn(BaseModel):
+    terms: dict[str, Any]
+    creator: str = Field(min_length=1, max_length=80)
+
+
+class PagActorIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=20)
+
+
+class PagEvidenceIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class CryptoSimulateIn(BaseModel):
@@ -418,3 +449,306 @@ async def stripe_webhook(request: Request, caller: str = Depends(require_auth)) 
                 updated += 1
     log_event(logger, "webhook.stripe.verified", caller=caller, etype=etype, updated=updated)
     return {"received": True, "event": etype, "updated": updated}
+
+
+# ---------- EVM Sepolia testnet (wallet signs, backend tracks + verifies) ----------
+
+@app.post("/api/payments/evm/request", status_code=201)
+async def evm_request(
+    body: EvmRequestIn,
+    tenant: str = Depends(require_tenant),
+    caller: str = Depends(require_auth),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Create a tracked Sepolia payment request. The wallet signs; the backend never sees keys."""
+    try:
+        evm_mod.assert_testnet(body.chainId)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not evm_mod.is_valid_address(body.to):
+        raise HTTPException(status_code=422, detail="invalid EVM address (0x + 40 hex)")
+    payload = body.model_dump()
+    key = _idem_key(tenant, "evm-request", idempotency_key, payload)
+    hit = store.idem_lookup(key)
+    if hit:
+        if hit["payload"] != payload:
+            raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
+        return _public(hit["response"])
+    pid = evm_mod.request_id(tenant, body.to, body.valueWei, idempotency_key or payload["to"])
+    now = int(time.time())
+    _db.evm_upsert({"id": pid, "tenant": tenant, "chain_id": body.chainId, "to": body.to,
+                    "value_wei": body.valueWei, "state": "requested",
+                    "expires_at": now + body.expiresInSec, "created_at": now})
+    response = {"paymentId": pid, "chainId": body.chainId, "to": body.to,
+                "valueWei": body.valueWei, "state": "requested",
+                "explorerBase": "https://sepolia.etherscan.io/tx/",
+                "sandbox": True, "note": "Sign with your wallet (Sepolia only). Backend never handles keys."}
+    store.idem_store(key, {"payload": payload, "response": response})
+    log_event(logger, "payment.evm.requested", tenant=tenant, caller=caller, paymentId=pid)
+    return _public(response)
+
+
+@app.post("/api/payments/evm/{payment_id}/submit")
+async def evm_submit(payment_id: str, body: EvmSubmitIn, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Register the wallet-submitted tx hash. Does NOT mark success — receipt decides."""
+    rec = _db.evm_get(payment_id, tenant)
+    if not rec:
+        raise HTTPException(status_code=404, detail="not found")
+    if not evm_mod.is_valid_txhash(body.txHash):
+        raise HTTPException(status_code=422, detail="invalid tx hash")
+    if rec["state"] in ("confirmed", "failed", "expired"):
+        raise HTTPException(status_code=409, detail=f"terminal state {rec['state']}, no resubmit")
+    if rec["tx_hash"] and rec["tx_hash"] != body.txHash:
+        rec = {**rec, "state": "replaced", "replaced_by": body.txHash}
+    rec = {**rec, "state": "pending", "tx_hash": body.txHash}
+    _db.evm_upsert(rec)
+    log_event(logger, "payment.evm.submitted", tenant=tenant, caller=caller, paymentId=payment_id)
+    return {"paymentId": payment_id, "state": "pending", "txHash": body.txHash,
+            "explorer": evm_mod.explorer_link(body.txHash), "sandbox": True,
+            "note": "pending = submitted, NOT confirmed. Receipt verification decides."}
+
+
+@app.get("/api/payments/evm/{payment_id}")
+async def evm_status(payment_id: str, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Verify receipt via RPC (when configured) and report chain state + business note."""
+    rec = _db.evm_get(payment_id, tenant)
+    if not rec:
+        raise HTTPException(status_code=404, detail="not found")
+    confirmations, receipt_note = rec.get("confirmations", 0), "stored state (RPC not configured)"
+    if rec.get("tx_hash"):
+        try:
+            receipt = evm_mod.verify_receipt(rec["tx_hash"],
+                                            config.EVM_CONFIRMATIONS_REQUIRED)
+            state = evm_mod.evaluate_chain_state(
+                receipt, config.EVM_CONFIRMATIONS_REQUIRED, rec.get("expires_at"))
+            confirmations, receipt_note = receipt.confirmations, "verified via RPC"
+            if state != rec["state"]:
+                rec = {**rec, "state": state, "confirmations": receipt.confirmations}
+                _db.evm_upsert(rec)
+        except ConnectionError as exc:
+            receipt_note = f"{exc} — returning stored state; safe to retry"
+    settled = rec["state"] == "confirmed"
+    return {"paymentId": payment_id, "chainId": rec["chain_id"], "state": rec["state"],
+            "txHash": rec.get("tx_hash", ""), "confirmations": confirmations,
+            "confirmationsRequired": config.EVM_CONFIRMATIONS_REQUIRED,
+            "explorer": evm_mod.explorer_link(rec["tx_hash"]) if rec.get("tx_hash") else None,
+            "businessSettled": False,
+            "note": f"chain: {receipt_note}. confirmed != settled: settlement is a separate business step. {'Eligible for settlement review.' if settled else ''}",
+            "sandbox": True}
+
+
+@app.post("/api/payments/evm/{payment_id}/replace")
+async def evm_replace(payment_id: str, body: EvmReplaceIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Register a replacement tx (same nonce, higher fee). Old hash linked, not lost."""
+    rec = _db.evm_get(payment_id, tenant)
+    if not rec:
+        raise HTTPException(status_code=404, detail="not found")
+    if not evm_mod.is_valid_txhash(body.newTxHash):
+        raise HTTPException(status_code=422, detail="invalid tx hash")
+    if rec["state"] in ("confirmed", "failed", "expired"):
+        raise HTTPException(status_code=409, detail=f"terminal state {rec['state']}")
+    old = rec.get("tx_hash", "")
+    rec = {**rec, "state": "pending", "tx_hash": body.newTxHash, "replaced_by": body.newTxHash}
+    _db.evm_upsert(rec)
+    log_event(logger, "payment.evm.replaced", tenant=tenant, caller=caller,
+              paymentId=payment_id, oldTx=old)
+    return {"paymentId": payment_id, "state": "pending", "txHash": body.newTxHash,
+            "replaced": old, "explorer": evm_mod.explorer_link(body.newTxHash), "sandbox": True}
+
+
+@app.get("/api/payments/evm")
+async def evm_list(tenant: str = Depends(require_tenant),
+                   caller: str = Depends(require_auth)) -> dict[str, Any]:
+    items = [{**p, "explorer": evm_mod.explorer_link(p["tx_hash"]) if p.get("tx_hash") else None}
+             for p in _db.evm_list(tenant)]
+    return {"payments": items, "chainId": evm_mod.SEPOLIA_CHAIN_ID, "sandbox": True}
+
+
+# ---------- programmable fiat agreements (deterministic, sandbox) ----------
+
+def _load_pag(ag_id: str, tenant: str) -> dict[str, Any]:
+    ag = _db.pag_get(ag_id, tenant)
+    if not ag:
+        raise HTTPException(status_code=404, detail="not found")
+    return ag
+
+
+@app.post("/api/contracts/programmable", status_code=201)
+async def pag_create(body: PagCreateIn, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth),
+                     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
+    errors = programmable.validate_creation(body.terms)
+    if errors:
+        raise HTTPException(status_code=422, detail={"errors": errors})
+    key = _idem_key(tenant, "pag-create", idempotency_key, body.model_dump())
+    hit = store.idem_lookup(key)
+    if hit:
+        return _public(hit["response"])
+    ag = programmable.new_agreement(tenant, body.creator, body.terms)
+    _db.pag_put(ag)
+    response = {"agreementId": ag["id"], "version": 1, "state": "draft",
+                "disclosure": programmable.DISCLOSURE, "sandbox": True}
+    store.idem_store(key, {"payload": body.model_dump(), "response": response})
+    log_event(logger, "contract.pag.created", tenant=tenant, caller=caller, agreementId=ag["id"])
+    return _public(response)
+
+
+@app.get("/api/contracts/programmable/{agreement_id}")
+async def pag_get(agreement_id: str, tenant: str = Depends(require_tenant),
+                  caller: str = Depends(require_auth)) -> dict[str, Any]:
+    ag = _load_pag(agreement_id, tenant)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if programmable.check_expiry(ag, now_iso) and ag["state"] not in ("completed", "canceled", "expired"):
+        ok, _ = programmable.can_transition(ag["state"], "expired", "system")
+        if ok:
+            programmable.append_event(ag, "system", "evaluate", "expired")
+            _db.pag_put(ag)
+    statuses = programmable.evaluate_all(ag["terms"], ag.get("evidence", {}), now_iso)
+    return {"agreementId": ag["id"], "version": ag.get("version", 1), "state": ag["state"],
+            "terms": ag["terms"], "evidence": ag.get("evidence", {}),
+            "conditionStatuses": statuses, "eligible": programmable.all_met(statuses),
+            "chainValid": programmable.verify_chain(ag), "history": ag.get("history", []),
+            "disclosure": programmable.DISCLOSURE, "sandbox": True}
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/activate")
+async def pag_activate(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                       caller: str = Depends(require_auth)) -> dict[str, Any]:
+    ag = _load_pag(agreement_id, tenant)
+    ok, why = programmable.can_transition(ag["state"], "active", body.role)
+    if not ok:
+        raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
+    programmable.append_event(ag, body.actor, "activate", "active")
+    programmable.append_event(ag, "system", "evaluate", "conditions_pending")
+    _db.pag_put(ag)
+    return {"agreementId": ag["id"], "state": ag["state"], "sandbox": True}
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/approve")
+async def pag_approve(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    ag = _load_pag(agreement_id, tenant)
+    if ag["state"] not in ("active", "conditions_pending", "disputed"):
+        raise HTTPException(status_code=409, detail=f"cannot approve in {ag['state']}")
+    ev = ag.setdefault("evidence", {}).setdefault("approvals", [])
+    if body.actor not in ev:
+        ev.append(body.actor)
+    _db.pag_put(ag)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    statuses = programmable.evaluate_all(ag["terms"], ag["evidence"], now_iso)
+    if programmable.all_met(statuses):
+        ok, _ = programmable.can_transition(ag["state"], "eligible_for_execution", "system")
+        if ok:
+            programmable.append_event(ag, "system", "evaluate", "eligible_for_execution")
+            _db.pag_put(ag)
+    return {"agreementId": ag["id"], "state": ag["state"], "eligible": programmable.all_met(statuses),
+            "sandbox": True}
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/evidence")
+async def pag_evidence(agreement_id: str, body: PagEvidenceIn, tenant: str = Depends(require_tenant),
+                       caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Attach authenticated evidence (delivery/external). Source MUST be authenticated
+    by the caller before submission — the engine treats the flag as authoritative."""
+    ag = _load_pag(agreement_id, tenant)
+    if ag["state"] not in ("active", "conditions_pending", "disputed"):
+        raise HTTPException(status_code=409, detail=f"cannot submit evidence in {ag['state']}")
+    incoming = body.evidence or {}
+    for k, v in (incoming.get("deliveries", {}) or {}).items():
+        if not isinstance(v, dict) or v.get("confirmedByAuthenticatedSource") is not True:
+            raise HTTPException(status_code=422, detail=f"delivery {k} not from authenticated source")
+    for k, v in (incoming.get("externalEvents", {}) or {}).items():
+        if not isinstance(v, dict) or v.get("authenticated") is not True:
+            raise HTTPException(status_code=422, detail=f"external event {k} not authenticated")
+    ag_ev = ag.setdefault("evidence", {})
+    for k, v in (incoming.get("deliveries", {}) or {}).items():
+        ag_ev.setdefault("deliveries", {})[k] = v
+    for k, v in (incoming.get("externalEvents", {}) or {}).items():
+        ag_ev.setdefault("externalEvents", {})[k] = v
+    _db.pag_put(ag)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    statuses = programmable.evaluate_all(ag["terms"], ag["evidence"], now_iso)
+    if programmable.all_met(statuses):
+        ok, _ = programmable.can_transition(ag["state"], "eligible_for_execution", "system")
+        if ok:
+            programmable.append_event(ag, "system", "evaluate", "eligible_for_execution")
+            _db.pag_put(ag)
+    return {"agreementId": ag["id"], "state": ag["state"], "eligible": programmable.all_met(statuses),
+            "sandbox": True}
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/execute")
+async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth),
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
+    """Execute an ELIGIBLE agreement via the fiat sandbox provider. Two gates:
+    deterministic eligibility AND explicit human authorization (role executor).
+    Eligibility alone never triggers payment."""
+    ag = _load_pag(agreement_id, tenant)
+    if body.role != "executor":
+        raise HTTPException(status_code=403, detail="execution requires human executor authorization")
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if programmable.check_expiry(ag, now_iso):
+        raise HTTPException(status_code=410, detail="agreement expired")
+    statuses = programmable.evaluate_all(ag["terms"], ag.get("evidence", {}), now_iso)
+    if not programmable.all_met(statuses):
+        raise HTTPException(status_code=409, detail={"eligible": False, "conditionStatuses": statuses,
+                                                     "note": "eligibility and execution are separate; conditions unmet"})
+    if ag["state"] != "eligible_for_execution":
+        raise HTTPException(status_code=409, detail=f"state {ag['state']} is not eligible_for_execution")
+    key = _idem_key(tenant, "pag-execute", idempotency_key, {"agreement": agreement_id})
+    hit = store.idem_lookup(key)
+    if hit:
+        return _public(hit["response"])
+    programmable.assert_sandbox_execution()
+    terms = ag["terms"]
+    try:
+        created = get_fiat_provider().create(int(terms["amountMinor"]), terms.get("currency", "EUR"),
+                                             f"{agreement_id}-exec")
+        result = get_fiat_provider().confirm(created.provider_ref, f"{agreement_id}-exec")
+    except ProviderError as exc:
+        raise HTTPException(status_code=502 if exc.code == "TIMEOUT_UNKNOWN" else 422,
+                            detail=f"{exc.code}: {exc}") from exc
+    programmable.append_event(ag, body.actor, "execute", "completed")
+    _db.pag_put(ag)
+    response = {"agreementId": ag["id"], "state": "completed",
+                "provider": created.provider, "providerRef": result.provider_ref,
+                "providerState": result.state, "sandbox": True,
+                "note": "Provider response is authoritative; this receipt is not a settlement guarantee."}
+    store.idem_store(key, {"payload": {"agreement": agreement_id}, "response": response})
+    log_event(logger, "contract.pag.executed", tenant=tenant, caller=caller, agreementId=ag["id"])
+    return _public(response)
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/cancel")
+async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+    ag = _load_pag(agreement_id, tenant)
+    ok, why = programmable.can_transition(ag["state"], "canceled", body.role)
+    if not ok:
+        raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
+    programmable.append_event(ag, body.actor, "cancel", "canceled")
+    _db.pag_put(ag)
+    return {"agreementId": ag["id"], "state": "canceled", "sandbox": True}
+
+
+@app.post("/api/contracts/programmable/{agreement_id}/dispute")
+async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    ag = _load_pag(agreement_id, tenant)
+    ok, why = programmable.can_transition(ag["state"], "disputed", body.role)
+    if not ok:
+        raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
+    programmable.append_event(ag, body.actor, "dispute", "disputed")
+    _db.pag_put(ag)
+    return {"agreementId": ag["id"], "state": "disputed", "sandbox": True}
+
+
+@app.get("/api/contracts/programmable")
+async def pag_list(tenant: str = Depends(require_tenant),
+                   caller: str = Depends(require_auth)) -> dict[str, Any]:
+    return {"agreements": _db.pag_list(tenant), "sandbox": True,
+            "disclosure": programmable.DISCLOSURE}

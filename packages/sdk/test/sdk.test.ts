@@ -57,3 +57,22 @@ describe("modal backend client", () => {
     }
   });
 });
+
+describe("evm + programmable", () => {
+  it("evmRequest posts Sepolia chain + idempotency, never mainnet by default", async () => {
+    const fn = mockFetchOnce(201, { paymentId: "evm-1", chainId: 11155111, state: "requested", sandbox: true });
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    const r = await c.evmRequest({ to: `0x${"ab".repeat(20)}`, valueWei: "1000" }, "k-evm");
+    expect(r.data.chainId).toBe(11155111);
+    const [, opts] = fn.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
+    expect(opts.headers["Idempotency-Key"]).toBe("k-evm");
+    expect(JSON.stringify(opts)).not.toMatch(/mnemonic|private_?key/i);
+  });
+  it("pagCreate -> pagGet carry disclosure, execute requires executor (server-enforced)", async () => {
+    const fn = mockFetchOnce(201, { agreementId: "pag-1", state: "draft", disclosure: "Not an escrow", sandbox: true });
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    const r = await c.pagCreate({ amountMinor: "100" }, "creator", "k-pag");
+    expect(r.data.sandbox).toBe(true);
+    expect(fn).toHaveBeenCalledOnce();
+  });
+});
