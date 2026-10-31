@@ -1,16 +1,15 @@
 """FastAPI application for the Modal sandbox backend.
 
-Endpoints (sandbox/testnet only):
-- GET  /health
-- POST /api/ai/analyze                  (draft only — never authorizes transfers)
-- POST /api/ai/explain-transaction      (advisory explanation)
-- POST /api/ai/fraud-signals            (advisory risk indicators, fail-closed)
-- POST /api/ai/routing-recommendation   (advisory route suggestion)
-- POST /api/ai/contract-analysis        (advisory agreement analysis)
-- POST /api/payments/fiat/simulate
-- POST /api/payments/crypto/simulate
-- POST /api/contracts/validate
-- GET  /api/transactions/{transaction_id}
+Fiat sandbox endpoints (test mode only, authoritative provider status):
+- POST /api/payments/fiat                 create (created/pending, idempotent)
+- POST /api/payments/fiat/{id}/confirm    confirm via provider (succeeded/failed)
+- GET  /api/payments/fiat/{id}            retrieve authoritative status
+- GET  /api/payments/fiat                 list tenant payments
+- POST /api/payments/fiat/{id}/cancel     cancel a pending payment
+- POST /api/payments/fiat/{id}/refund     refund a succeeded payment
+- POST /api/webhooks/stripe               verified provider webhook (idempotent ingest)
+Legacy aliases (unchanged contract): POST /api/payments/fiat/simulate,
+POST /api/payments/crypto/simulate, GET /api/transactions/{id}.
 
 AI endpoints are ADVISORY ONLY (advisoryOnly=true in every response) and can
 never approve, sign, release, or transfer funds. Deterministic backend rules
@@ -32,9 +31,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import ai, config, contracts, meta_client, providers, store
+from . import ai, config, contracts, meta_client, payments, providers, store
+from . import db as _db
 from .auth import require_auth, require_tenant
+from .db import tx_get as db_tx_get, tx_list as db_tx_list, tx_upsert as db_tx_upsert
 from .logging_util import get_logger, log_event
+from .payments import ProviderError, get_fiat_provider, verify_stripe_webhook
 
 logger = get_logger("hybridpay.api")
 
@@ -66,6 +68,19 @@ class FiatSimulateIn(BaseModel):
     amountMinor: str = Field(pattern=r"^\d+$", max_length=12)
     instructionId: str = Field(min_length=1, max_length=80)
     currency: str = Field(default="EUR", pattern=r"^[A-Z]{3}$")
+
+
+class FiatCreateIn(BaseModel):
+    """Create a sandbox fiat payment. Provider-hosted collection only —
+    the response clientSecret (Stripe TEST) is for the provider SDK; raw
+    card numbers/CVV are never accepted here (no such fields exist)."""
+    amountMinor: str = Field(pattern=r"^\d+$", max_length=12)
+    currency: str = Field(default="EUR", pattern=r"^[A-Z]{3}$")
+    instructionId: str = Field(min_length=1, max_length=80)
+
+
+class FiatRefundIn(BaseModel):
+    amountMinor: str | None = Field(default=None, pattern=r"^\d+$", max_length=12)
 
 
 class CryptoSimulateIn(BaseModel):
@@ -144,6 +159,11 @@ async def ai_contract(body: AiContractIn, tenant: str = Depends(require_tenant),
     return _ai_or_429(ai.analyze_contract, body.terms, tenant)
 
 
+def _public(response: dict[str, Any]) -> dict[str, Any]:
+    """Strip internal idempotency bookkeeping before returning to clients."""
+    return {k: v for k, v in response.items() if k != "_payload"}
+
+
 def _idem_key(tenant: str, route: str, key: str | None, body: dict[str, Any]) -> str:
     raw = f"{tenant}:{route}:{key or hashlib.sha256(str(body).encode()).hexdigest()}"
     return raw
@@ -162,7 +182,7 @@ async def fiat_simulate(
     if hit:
         if hit["payload"] != payload:
             raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
-        return hit["response"]
+        return _public(hit["response"])
     amount = int(body.amountMinor)
     result = providers.fiat_authorize(amount, body.instructionId)
     if not result.ok:
@@ -193,7 +213,7 @@ async def crypto_simulate(
     if hit:
         if hit["payload"] != payload:
             raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
-        return hit["response"]
+        return _public(hit["response"])
     result = providers.crypto_invoice(int(body.amountMinor), body.instructionId)
     if not result.ok:
         raise HTTPException(status_code=503, detail=f"{result.code}: {result.message}")
@@ -222,3 +242,179 @@ async def tx_get(transaction_id: str, tenant: str = Depends(require_tenant),
         raise HTTPException(status_code=404, detail="not found")
     log_event(logger, "tx.read", caller=caller, transactionId=transaction_id)
     return {k: v for k, v in record.items() if k != "tenant"}
+
+
+# ---------- Fiat sandbox payments (modular provider, authoritative status) ----------
+
+def _provider_label() -> str:
+    return get_fiat_provider().name
+
+
+@app.post("/api/payments/fiat", status_code=201)
+async def fiat_create(
+    body: FiatCreateIn,
+    tenant: str = Depends(require_tenant),
+    caller: str = Depends(require_auth),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    """Create a sandbox payment (state created->pending). Idempotent per key+payload."""
+    payload = body.model_dump()
+    key = _idem_key(tenant, "fiat-create", idempotency_key, payload)
+    hit = store.idem_lookup(key)
+    if hit:
+        if hit["payload"] != payload:
+            raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
+        return _public(hit["response"])
+    try:
+        created = get_fiat_provider().create(int(body.amountMinor), body.currency, body.instructionId)
+    except ProviderError as exc:
+        raise HTTPException(status_code=422 if exc.code != "TIMEOUT_UNKNOWN" else 502,
+                            detail=f"{exc.code}: {exc}") from exc
+    tx_id = f"pay-{uuid.uuid4().hex[:12]}"
+    response: dict[str, Any] = {"paymentId": tx_id, "state": created.state,
+                                "provider": created.provider, "providerRef": created.provider_ref,
+                                "amountMinor": body.amountMinor, "currency": body.currency,
+                                "sandbox": True, "liveMode": config.live_mode_status()}
+    if created.raw and created.raw.get("client_secret"):
+        response["clientSecret"] = created.raw["client_secret"]  # provider SDK only, TEST mode
+    db_tx_upsert({"id": tx_id, "tenant": tenant, "state": created.state,
+                  "amountMinor": body.amountMinor, "currency": body.currency,
+                  "provider": created.provider, "providerRef": created.provider_ref,
+                  "idempotencyKey": key, "payload": {}})
+    store.idem_store(key, {"payload": payload, "response": response})
+    log_event(logger, "payment.fiat.created", tenant=tenant, caller=caller,
+              transactionId=tx_id, state=created.state, provider=created.provider)
+    return _public(response)
+
+
+def _load_owned(payment_id: str, tenant: str) -> dict[str, Any]:
+    rec = db_tx_get(payment_id, tenant)
+    if not rec:
+        raise HTTPException(status_code=404, detail="not found")
+    return rec
+
+
+@app.post("/api/payments/fiat/{payment_id}/confirm")
+async def fiat_confirm(payment_id: str, tenant: str = Depends(require_tenant),
+                       caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Confirm via the PROVIDER (authoritative). Never trusts frontend state."""
+    rec = _load_owned(payment_id, tenant)
+    if rec["state"] in ("succeeded", "refunded", "canceled"):
+        return {"paymentId": payment_id, "state": rec["state"], "providerRef": rec["providerRef"],
+                "sandbox": True, "note": "terminal state, no re-confirm"}
+    instruction = rec.get("payload", {}).get("instructionId", payment_id)
+    try:
+        result = get_fiat_provider().confirm(rec["providerRef"], instruction)
+    except ProviderError as exc:
+        if exc.code == "TIMEOUT_UNKNOWN":
+            db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
+                          "amountMinor": rec.get("amountMinor", "0"), "state": "unknown",
+                          "providerRef": rec.get("providerRef", ""), "payload": rec.get("payload", {})})
+            raise HTTPException(status_code=502, detail=f"TIMEOUT_UNKNOWN: query original before retry") from exc
+        raise HTTPException(status_code=422, detail=f"{exc.code}: {exc}") from exc
+    db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
+                  "amountMinor": rec.get("amountMinor", "0"), "state": result.state,
+                  "providerRef": result.provider_ref, "payload": rec.get("payload", {})})
+    log_event(logger, "payment.fiat.confirmed", tenant=tenant, caller=caller,
+              transactionId=payment_id, state=result.state)
+    return {"paymentId": payment_id, "state": result.state, "providerRef": result.provider_ref, "sandbox": True}
+
+
+@app.get("/api/payments/fiat/{payment_id}")
+async def fiat_retrieve(payment_id: str, tenant: str = Depends(require_tenant),
+                        caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Authoritative retrieve: queries provider when TEST key present, else stored state."""
+    rec = _load_owned(payment_id, tenant)
+    if config.STRIPE_SECRET_KEY_TEST and rec.get("provider") == "stripe-test" and rec.get("providerRef"):
+        try:
+            live = get_fiat_provider().retrieve(rec["providerRef"])
+            if live.state != rec["state"]:
+                db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
+                              "amountMinor": rec.get("amountMinor", "0"), "state": live.state,
+                              "providerRef": live.provider_ref, "payload": rec.get("payload", {})})
+                rec = {**rec, "state": live.state, "providerRef": live.provider_ref}
+        except ProviderError as exc:
+            rec = {**rec, "providerNote": f"{exc.code}: retrieve ambiguous, stored state returned"}
+    log_event(logger, "payment.fiat.retrieved", tenant=tenant, caller=caller, transactionId=payment_id)
+    return {"paymentId": payment_id, "state": rec["state"], "provider": rec.get("provider"),
+            "providerRef": rec.get("providerRef"), "amountMinor": rec.get("amountMinor"),
+            "currency": rec.get("currency"), "sandbox": True}
+
+
+@app.get("/api/payments/fiat")
+async def fiat_list(tenant: str = Depends(require_tenant),
+                    caller: str = Depends(require_auth)) -> dict[str, Any]:
+    items = db_tx_list(tenant)
+    log_event(logger, "payment.fiat.listed", tenant=tenant, caller=caller, count=len(items))
+    return {"payments": items, "sandbox": True}
+
+
+@app.post("/api/payments/fiat/{payment_id}/cancel")
+async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    rec = _load_owned(payment_id, tenant)
+    if rec["state"] not in ("created", "pending", "unknown"):
+        raise HTTPException(status_code=409, detail=f"cannot cancel from state {rec['state']}")
+    try:
+        result = get_fiat_provider().cancel(rec["providerRef"])
+    except ProviderError as exc:
+        raise HTTPException(status_code=422, detail=f"{exc.code}: {exc}") from exc
+    db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
+                  "amountMinor": rec.get("amountMinor", "0"), "state": result.state,
+                  "providerRef": result.provider_ref, "payload": rec.get("payload", {})})
+    return {"paymentId": payment_id, "state": result.state, "sandbox": True}
+
+
+@app.post("/api/payments/fiat/{payment_id}/refund")
+async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    rec = _load_owned(payment_id, tenant)
+    if rec["state"] != "succeeded":
+        raise HTTPException(status_code=409, detail="only succeeded payments can be refunded")
+    try:
+        result = get_fiat_provider().refund(rec["providerRef"],
+                                            int(body.amountMinor) if body.amountMinor else None)
+    except ProviderError as exc:
+        raise HTTPException(status_code=422, detail=f"{exc.code}: {exc}") from exc
+    db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
+                  "amountMinor": rec.get("amountMinor", "0"), "state": result.state,
+                  "providerRef": result.provider_ref, "payload": rec.get("payload", {})})
+    log_event(logger, "payment.fiat.refunded", tenant=tenant, caller=caller, transactionId=payment_id)
+    return {"paymentId": payment_id, "state": result.state, "refundRef": result.provider_ref, "sandbox": True}
+
+
+@app.post("/api/webhooks/stripe")
+async def stripe_webhook(request: Request, caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Verified Stripe webhook: signature-checked, idempotent, authoritative state source."""
+    raw = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    secret = config.STRIPE_WEBHOOK_SECRET_TEST
+    try:
+        event = verify_stripe_webhook(raw, sig, secret)
+    except ProviderError as exc:
+        code = 410 if exc.code == "STALE_EVENT" else 401
+        raise HTTPException(status_code=code, detail=f"{exc.code}: {exc}") from exc
+    if not event["id"]:
+        raise HTTPException(status_code=422, detail="bad event")
+    dedupe_key = f"wh:stripe:{event['id']}"
+    if store.idem_lookup(dedupe_key):
+        return {"received": True, "deduped": True}
+    store.idem_store(dedupe_key, {"payload": event, "response": {"received": True}})
+    etype = event.get("type", "")
+    new_state = {"payment_intent.succeeded": "succeeded", "payment_intent.payment_failed": "failed",
+                 "payment_intent.canceled": "canceled"}.get(etype)
+    updated = 0
+    if new_state and event.get("payment_intent"):
+        conn = _db._connect()
+        rows = conn.execute("SELECT id, tenant FROM transactions WHERE provider_ref=?",
+                            (event["payment_intent"],)).fetchall()
+        for r in rows:
+            current = db_tx_get(r["id"], r["tenant"])
+            if current and current["state"] not in ("refunded", "succeeded"):
+                db_tx_upsert({**current, "id": r["id"], "tenant": r["tenant"],
+                              "amountMinor": current.get("amountMinor", "0"),
+                              "state": new_state, "providerRef": event["payment_intent"],
+                              "payload": current.get("payload", {})})
+                updated += 1
+    log_event(logger, "webhook.stripe.verified", caller=caller, etype=etype, updated=updated)
+    return {"received": True, "event": etype, "updated": updated}

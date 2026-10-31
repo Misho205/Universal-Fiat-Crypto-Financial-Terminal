@@ -1,25 +1,54 @@
-# HybridPay Terminal — merchant web/PWA terminal + customer QR checkout with deterministic conditional-payment engine.
+# Universal Hybrid Payment Terminal (HybridPay)
 
-> Live mode OFF. No custody of merchant keys. Technical receipt is NOT a fiscal receipt.
+Merchant web/PWA terminal + customer QR checkout with a deterministic conditional-payment
+("fiat smart contract") engine, crypto testnet support, advisory AI, and a Modal sandbox backend
+for hackathon demos.
 
-## Quickstart (M1)
-1. `cp .env.example .env`
+> **Live mode OFF.** Sandbox/testnet only. No custody of merchant keys. No real money can move
+> (fail-closed without a signed live approval + live credentials, which are absent).
+> Technical receipt is NOT a fiscal receipt.
+
+## What is here
+- **Terminal** (`apps/terminal`, Next.js, BG/EN): order/QR, fiat sandbox, crypto testnet, contract
+  validation, transaction status + advisory AI, visual **simulator** (`/simulator`) for human trial tests.
+- **NestJS API** (`apps/api`): modular monolith, system of record (PostgreSQL + Prisma migrations).
+- **Worker** (`apps/worker`): Temporal activities/workflows (provider calls live outside DB tx).
+- **Modal backend** (`modal_backend/`, FastAPI): stateless sandbox executor + advisory AI —
+  fiat sandbox payments E2E (`POST /api/payments/fiat` → `/confirm` → retrieve/cancel/refund),
+  HMAC-verified Stripe webhook, SQLite durability (`./data/hybridpay.db`), contract validator.
+- **Packages**: `domain` (exact money), `agreements` (DSL validator), `ledger` (balanced journal),
+  `policies` (OPA), `adapters` (mock/Stripe-sandbox/BTCPay-regtest), `sdk` (typed browser client).
+
+## Quickstart (local, sandbox)
+1. `cp .env.example .env` — keep `LIVE_MODE=false`; fill only `*_TEST` keys. Frontend uses only
+   `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_MODAL_API_URL`, `NEXT_PUBLIC_API_TOKEN` (sandbox bearer).
 2. `docker compose -f infra/docker-compose.yml up -d postgres redis temporal opa otel`
-3. `pnpm install && pnpm test` (10 suites green)
+3. `pnpm install && pnpm build && pnpm test` (9/9 builds, 11/11 suites green)
 4. `psql $DATABASE_URL -f migrations/001_init.sql`
-5. Run api: `pnpm --filter @hybridpay/api build && PORT_API=3001 node apps/api/dist/main.js`
-6. E2E mock: `API_BASE=http://localhost:3001 node tests/e2e/mock-flow.mjs`
-7. Terminal: `pnpm --filter @hybridpay/terminal dev` (BG/EN toggle, QR payload from checkout-token endpoint)
+5. Nest API: `pnpm --filter @hybridpay/api build && PORT_API=3001 node apps/api/dist/main.js`
+6. Modal backend (local): `API_SHARED_TOKEN=dev-shared-token uvicorn modal_backend.api:app --port 8000`
+7. Terminal: `pnpm --filter @hybridpay/terminal dev` → `http://localhost:3000` (+ `/simulator`)
+8. E2E: `API_BASE=http://localhost:3001 node tests/e2e/mock-flow.mjs`;
+   `HYBRIDPAY_DB_MEMORY=1 API_SHARED_TOKEN=dev-shared-token pytest modal_backend/ -q` (25 passed, 1 skipped)
 
-## Layout
-apps/terminal (Next.js PWA, bg/en), apps/api (NestJS modular monolith), apps/worker (Temporal activities/workflows),
-packages/domain|agreements|ledger|policies|adapters|sdk, infra/docker-compose.yml, migrations/, docs/, tests/e2e.
+## Modal (operator step — no auto-deploy)
+`modal serve modal_backend/app.py` (preview) / `modal deploy modal_backend/app.py` (demo only).
+Full checklist, secrets, costs, verification, rollback, readiness: `docs/modal-deploy-checklist.md`.
+`modal secret list` must show `hybridpay-test`; `/health` must report `liveMode: OFF`.
 
-## Docs
-docs/PRMD.md→PRD.md, architecture.md, threat-model.md, money-flows.md, provider-capabilities.md (verified 2026-10-31),
-regulatory-boundaries.md, ADRs/, deployment.md, credentials-runbook.md, test-report.md. OpenAPI: apps/api/openapi.yaml.
+## Docs (start here)
+- `IMPLEMENTATION_STATUS.md` — what works / what was tested / exact next steps (no invented results).
+- `docs/fiat-sandbox.md` — fiat E2E architecture + mocked tests + documented Stripe TEST run.
+- `docs/modal-deploy-checklist.md` — deploy procedure, verification, rollback, costs, readiness.
+- `docs/live-mode.md` — LIVE guardrails (fail-closed).
+- `docs/real-money-roadmap.md` — what real money + on-chain contracts require (license, fiscal, KYC, audit).
+- `docs/PRD.md`, `docs/architecture.md`, `docs/money-flows.md`, `docs/provider-capabilities.md`,
+  `docs/threat-model.md`, `docs/regulatory-boundaries.md`, `docs/deployment.md`,
+  `docs/credentials-runbook.md`, `docs/test-report.md`, `docs/ADRs/`. OpenAPI: `apps/api/openapi.yaml`.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`.
 
-## Money safety
-Exact-decimal strings + BIGINT minor/atomic units; balanced per-asset journal; idempotency `tenant:op:sha256(content)` with 409 on conflict;
-tenant-scoped queries; revoked-device fail-closed; atomic day-limit reservations; UNKNOWN + reconcile, no unsafe failover.
-Stripe sandbox = Direct charges; BTCPay = regtest invoices; both BLOCKED without TEST creds (mock used). Live disabled.
+## Money safety (enforced, tested)
+Exact-decimal strings + BIGINT minor/atomic units; balanced per-asset journal; idempotency
+`tenant:op:sha256(content)` with 409 on conflict; tenant-scoped queries; revoked-device fail-closed;
+atomic day-limit reservations; UNKNOWN + reconcile, no unsafe failover; provider status always
+authoritative (frontend never marks success); AI advisory-only, never moves funds.

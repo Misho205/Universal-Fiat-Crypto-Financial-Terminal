@@ -104,6 +104,36 @@ export class ModalBackendClient {
       method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),
     });
   }
+  // --- Fiat sandbox payments (authoritative provider status, TEST mode only) ---
+  fiatCreate(body: FiatSimulateBody, idempotencyKey: string) {
+    return this.request<TxStatus & { paymentId: string; provider?: string; clientSecret?: string }>(
+      "/api/payments/fiat", {
+        method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),
+      });
+  }
+  fiatConfirm(paymentId: string) {
+    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/confirm`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({}),
+    });
+  }
+  fiatGet(paymentId: string) {
+    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}`, {
+      headers: this.headers(),
+    });
+  }
+  fiatList() {
+    return this.request<{ payments: TxStatus[]; sandbox: boolean }>("/api/payments/fiat", { headers: this.headers() });
+  }
+  fiatCancel(paymentId: string) {
+    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/cancel`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({}),
+    });
+  }
+  fiatRefund(paymentId: string, amountMinor?: string) {
+    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/refund`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(amountMinor ? { amountMinor } : {}),
+    });
+  }
   cryptoSimulate(body: CryptoSimulateBody, idempotencyKey: string) {
     return this.request<TxStatus>("/api/payments/crypto/simulate", {
       method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),

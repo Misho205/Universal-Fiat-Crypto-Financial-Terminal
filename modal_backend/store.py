@@ -1,41 +1,58 @@
-"""Ephemeral in-memory store for the Modal sandbox backend.
+"""Durable store facade: same function names as before, backed by db.py (SQLite file).
 
-WARNING: Modal container storage is NOT durable. This store is for local
-development and hackathon demo only. Production MUST use an external durable
-database (the existing PostgreSQL / NestJS apps/api remains the system of
-record — Modal never becomes authoritative for money).
+Records survive restarts in ./data/hybridpay.db (or HYBRIDPAY_DB_PATH).
+Tests call reset() to clear rows. Tenant is embedded in the idempotency key
+("tenant:route:...") so it can be recovered without changing callers.
 """
 from __future__ import annotations
 
-from threading import Lock
+import json
 from typing import Any
 
-_lock = Lock()
-_transactions: dict[str, dict[str, Any]] = {}
-_idem: dict[str, dict[str, Any]] = {}
+from . import db
+
+
+def _tenant_from_key(key: str) -> str:
+    return key.split(":", 1)[0] if ":" in key else ""
 
 
 def idem_lookup(key: str) -> dict[str, Any] | None:
-    with _lock:
-        return _idem.get(key)
+    hit = db.idem_get(key)
+    if not hit:
+        return None
+    response = hit["response"] or {}
+    payload = response.get("_payload", {})
+    return {"payload": payload, "response": response}
 
 
 def idem_store(key: str, record: dict[str, Any]) -> None:
-    with _lock:
-        _idem[key] = record
+    payload = record.get("payload", {})
+    response = dict(record.get("response", {}))
+    response.setdefault("_payload", payload)
+    db.idem_put(key, _tenant_from_key(key), payload, response)
 
 
 def tx_store(tx_id: str, record: dict[str, Any]) -> None:
-    with _lock:
-        _transactions[tx_id] = record
+    db.tx_upsert({"id": tx_id, "tenant": record.get("tenant", ""),
+                  "state": record.get("state", "unknown"),
+                  "amountMinor": str(record.get("amountMinor", "0")),
+                  "currency": record.get("currency", "EUR"),
+                  "provider": record.get("provider", "mock"),
+                  "providerRef": record.get("providerRef", ""),
+                  "idempotencyKey": record.get("idempotencyKey", ""),
+                  "payload": {"transactionId": tx_id, "state": record.get("state"),
+                              "providerRef": record.get("providerRef", ""),
+                              "sandbox": record.get("sandbox", True)}})
 
 
 def tx_get(tx_id: str) -> dict[str, Any] | None:
-    with _lock:
-        return _transactions.get(tx_id)
+    conn = db._connect()
+    row = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    if not row:
+        return None
+    payload = json.loads(row["payload_json"] or "{}")
+    return {"tenant": row["tenant"], **payload}
 
 
-def reset() -> None:  # tests only
-    with _lock:
-        _transactions.clear()
-        _idem.clear()
+def reset() -> None:
+    db.reset_for_tests()

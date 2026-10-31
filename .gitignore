@@ -9,3 +9,6 @@ __pycache__/
 .pytest_cache/
 *.zip
 next-env.d.ts
+data/
+*.db
+*.sqlite3

@@ -64,8 +64,16 @@ export default function Home() {
     if (fiatBusy) return; setFiatBusy(true); setFiatOut({ kind: "loading" });
     try {
       const key = `ui-fiat-${Date.now()}`;
-      const r = await modal.fiatSimulate({ amountMinor: fiatAmt, instructionId: fiatIns, currency: "EUR" }, key);
-      setFiatOut({ kind: "ok", text: JSON.stringify(r.data) });
+      const created = await modal.fiatCreate({ amountMinor: fiatAmt, instructionId: fiatIns, currency: "EUR" }, key);
+      const pid = (created.data as { paymentId: string }).paymentId;
+      let detail = `created: ${JSON.stringify(created.data)}`;
+      try {
+        const confirmed = await modal.fiatConfirm(pid);
+        detail += `\nconfirmed (authoritative, provider): ${JSON.stringify(confirmed.data)}`;
+      } catch (ce) {
+        detail += `\nconfirm: ${friendlyError(ce, locale)}`;
+      }
+      setFiatOut({ kind: "ok", text: detail });
     } catch (e) { setFiatOut({ kind: "err", text: friendlyError(e, locale), retryable: e instanceof ApiError ? e.retryable : true }); }
     finally { setFiatBusy(false); }
   }
