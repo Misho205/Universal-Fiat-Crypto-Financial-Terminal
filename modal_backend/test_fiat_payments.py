@@ -18,8 +18,15 @@ from modal_backend.api import app
 
 TENANT = "fiat-e2e"
 AUTH = {"Authorization": "Bearer dev-shared-token"}
+ADMIN_TOKEN = "dev-admin-token"
 TID = {"X-Tenant-Id": TENANT}
 H = {**TID, **AUTH}
+AH = {**TID, "Authorization": f"Bearer {ADMIN_TOKEN}"}
+
+
+def _admin(monkeypatch):
+    import modal_backend.config as cfg
+    monkeypatch.setattr(cfg, "API_ADMIN_TOKEN", ADMIN_TOKEN)
 
 
 def _client() -> TestClient:
@@ -68,23 +75,30 @@ def test_idempotent_create_and_conflict():
     assert r3.status_code == 409
 
 
-def test_failed_create_for_fail_scenario_and_cancel_gating():
+def test_failed_create_for_fail_scenario_and_cancel_gating(monkeypatch):
+    _admin(monkeypatch)
     c = _client()
     r = _create(c, ins="x-fail", key="kf")  # mock scenario suffix -> failed
     assert r.json()["state"] == "failed"
     pid = r.json()["paymentId"]
-    assert c.post(f"/api/payments/fiat/{pid}/cancel", headers=H).status_code == 409
-    assert c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=H).status_code == 409
+    # operator cannot touch money movement at all
+    assert c.post(f"/api/payments/fiat/{pid}/cancel", headers=H).status_code == 403
+    # admin reaches state gating (failed cannot cancel)
+    assert c.post(f"/api/payments/fiat/{pid}/cancel", headers=AH).status_code == 409
+    assert c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=AH).status_code == 409
 
 
-def test_refund_only_after_success():
+def test_refund_only_after_success(monkeypatch):
+    _admin(monkeypatch)
     c = _client()
     r = _create(c, ins="ok-pay", key="kr")
     pid = r.json()["paymentId"]
-    assert c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=H).status_code == 409
+    # operator refund is forbidden even before state checks
+    assert c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=H).status_code == 403
+    assert c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=AH).status_code == 409
     cf = c.post(f"/api/payments/fiat/{pid}/confirm", headers=H)
     if cf.json().get("state") == "succeeded":
-        rf = c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=H)
+        rf = c.post(f"/api/payments/fiat/{pid}/refund", json={}, headers=AH)
         assert rf.status_code == 200
         assert rf.json()["state"] == "refunded"
 

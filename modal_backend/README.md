@@ -43,7 +43,10 @@ interpreters, if a wheel fails to build, install unpinned instead:
 ## Configure (no secrets in source)
 ```
 export ALLOWED_ORIGINS="http://localhost:3000,http://localhost:3001"
-export API_SHARED_TOKEN="dev-shared-token"   # required by tests/clients
+export API_SHARED_TOKEN="dev-shared-token"   # operator role (required by tests/clients)
+export API_ADMIN_TOKEN="dev-admin-token"     # admin role: cancel/refund/dispute/execute
+export HYBRIDPAY_DB_PATH="./data/hybridpay.db"  # local file; omit on Modal (Volume /mnt/data)
+export DATABASE_URL=""                       # empty = SQLite; postgresql://... for production
 # sandbox provider keys (optional; without them the mock/blocked path is used)
 export STRIPE_SECRET_KEY_TEST="" BTCPAY_API_KEY_TEST="" BTCPAY_STORE_ID_TEST=""
 export MODEL_API_KEY=""                      # empty => offline-safe AI stub
@@ -53,8 +56,8 @@ export META_MODEL_ID="muse-spark-1.3"
 
 ## Run tests (no Modal account, no network, no paid tokens)
 ```
-API_SHARED_TOKEN=dev-shared-token pytest modal_backend/ -q
-# 15 passed, 1 skipped (live integration, opt-in only — see below)
+API_SHARED_TOKEN=dev-shared-token API_ADMIN_TOKEN=dev-admin-token pytest modal_backend/ -q
+# 47+ passed, 3 skipped (live integrations, opt-in only — see below)
 ```
 
 Live integration test (consumes tokens; runs ONLY when explicitly enabled):
@@ -72,7 +75,8 @@ curl localhost:8000/health
 ## Deploy to Modal (operator step — do NOT run for production)
 Prerequisite: `modal token new` (one interactive login), then:
 ```
-modal secret create hybridpay-test API_SHARED_TOKEN=... STRIPE_SECRET_KEY_TEST=... \
+modal secret create hybridpay-test API_SHARED_TOKEN=... API_ADMIN_TOKEN=... \
+  HYBRIDPAY_DB_PATH=/mnt/data/hybridpay.db DATABASE_URL=... STRIPE_SECRET_KEY_TEST=... \
   BTCPAY_URL_TEST=... BTCPAY_API_KEY_TEST=... BTCPAY_STORE_ID_TEST=... \
   MODEL_API_KEY=... META_MODEL_BASE_URL=... META_MODEL_ID=muse-spark-1.3
 modal serve modal_backend/app.py   # preview

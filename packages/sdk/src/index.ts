@@ -241,6 +241,22 @@ export class ModalBackendClient {
       headers: this.headers(),
     });
   }
+  me() {
+    return this.request<{ role: string; sandbox: boolean; liveMode: string }>(`/api/me`, {
+      headers: this.headers(),
+    });
+  }
+  dashboardSummary() {
+    return this.request<{ tenant: string; sandbox: boolean; fiat: { total: number; byState: Record<string, number> }; evm: { total: number; byState: Record<string, number>; chainId: number }; agreements: { total: number; byState: Record<string, number> } }>(`/api/dashboard/summary`, {
+      headers: this.headers(),
+    });
+  }
+  dashboardRecent(params: { kind?: string; state?: string; q?: string; limit?: number } = {}) {
+    const qs = new URLSearchParams({ kind: params.kind ?? "all", ...(params.state ? { state: params.state } : {}), ...(params.q ? { q: params.q } : {}), limit: String(params.limit ?? 50) }).toString();
+    return this.request<{ items: { kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }[]; sandbox: boolean }>(`/api/dashboard/recent?${qs}`, {
+      headers: this.headers(),
+    });
+  }
 }
 
 /** Friendly Bulgarian/English message for ApiError (no secret leakage). */

@@ -5,13 +5,14 @@ import { HybridPayClient, ModalBackendClient, ApiError, friendlyError } from "@h
 import EvmPanel from "../src/EvmPanel";
 import AgreementsPanel from "../src/AgreementsPanel";
 import AssistantPanel from "../src/AssistantPanel";
+import DashboardPanel from "../src/DashboardPanel";
 
 // Browser-safe config: only NEXT_PUBLIC_* (never secrets). Meta/provider keys stay in Modal Secrets.
 const NEST_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const MODAL_URL = process.env.NEXT_PUBLIC_MODAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const DEV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN ?? "";
 
-type Tab = "order" | "fiat" | "crypto" | "contract" | "status" | "evm" | "agreements" | "assistant";
+type Tab = "dashboard" | "order" | "fiat" | "crypto" | "contract" | "status" | "evm" | "agreements" | "assistant";
 type Outcome = { kind: "idle" } | { kind: "loading" } | { kind: "ok"; text: string } | { kind: "err"; text: string; retryable: boolean };
 
 function useIdempotency() {
@@ -27,11 +28,19 @@ const btn: React.CSSProperties = { marginRight: 8, marginTop: 8 };
 
 export default function Home() {
   const [locale, setLocale] = useState<Locale>("bg");
-  const [tab, setTab] = useState<Tab>("order");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [tenant, setTenant] = useState("demo-tenant");
+  // Session token lives in memory only (useState) — never localStorage/sessionStorage.
+  const [token, setToken] = useState(DEV_TOKEN);
+  const [tokenInput, setTokenInput] = useState("");
+  const [role, setRole] = useState("—");
   const t = dict[locale];
-  const nest = useMemo(() => new HybridPayClient({ baseUrl: NEST_URL, tenantId: tenant, token: DEV_TOKEN || undefined }), [tenant]);
-  const modal = useMemo(() => new ModalBackendClient({ baseUrl: MODAL_URL, tenantId: tenant, token: DEV_TOKEN || undefined }), [tenant]);
+  const nest = useMemo(() => new HybridPayClient({ baseUrl: NEST_URL, tenantId: tenant, token: token || undefined }), [tenant, token]);
+  const modal = useMemo(() => new ModalBackendClient({ baseUrl: MODAL_URL, tenantId: tenant, token: token || undefined }), [tenant, token]);
+  async function refreshRole() {
+    try { const r = await modal.me(); setRole((r.data as { role: string }).role); }
+    catch { setRole("unreachable"); }
+  }
 
   // order state (existing flow, now via SDK + full states)
   const [amount, setAmount] = useState("10.00");
@@ -145,18 +154,29 @@ export default function Home() {
       </div>
       <h1>HybridPay Terminal — {t.newOrder}</h1>
       <div>
-        {(["order", "fiat", "crypto", "evm", "contract", "agreements", "assistant", "status"] as Tab[]).map((k) => (
+        {(["dashboard", "order", "fiat", "crypto", "evm", "contract", "agreements", "assistant", "status"] as Tab[]).map((k) => (
           <button key={k} style={{ ...btn, fontWeight: tab === k ? "bold" : "normal" }} onClick={() => setTab(k)}>
-            {k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "evm" ? t.tabEvm : k === "contract" ? t.tabContract : k === "agreements" ? t.tabAgreements : k === "assistant" ? t.tabAssistant : t.tabStatus}
+            {k === "dashboard" ? t.tabDashboard : k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "evm" ? t.tabEvm : k === "contract" ? t.tabContract : k === "agreements" ? t.tabAgreements : k === "assistant" ? t.tabAssistant : t.tabStatus}
           </button>
         ))}
       </div>
       <div style={box}>
-        <label>{t.tenant}: <input value={tenant} onChange={(e) => setTenant(e.target.value)} /></label>
+        <label>{t.tenant}: <input value={tenant} onChange={(e) => setTenant(e.target.value)} autoComplete="off" /></label>
         <div style={{ color: "#555", fontSize: 12, marginTop: 4 }}>Nest: {NEST_URL} · Modal: {MODAL_URL}</div>
+        <div style={{ marginTop: 4 }}>
+          <label>{t.tokenLabel}: <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} autoComplete="off" placeholder={token ? "••••••" : ""} /></label>
+          <button style={btn} onClick={() => { setToken(tokenInput); setTokenInput(""); refreshRole(); }}>{t.signIn}</button>
+          <button style={btn} onClick={() => { setToken(""); setTokenInput(""); setRole("—"); }}>{t.logout}</button>
+          <span style={{ marginLeft: 8 }}>{t.roleLabel}: <code>{role}</code>{role === "admin" ? "" : role === "operator" ? " (money movement needs admin)" : ""}</span>
+        </div>
         <div style={{ marginTop: 4 }}><button onClick={async () => { try { const h = await modal.health(); setHealth(JSON.stringify(h.data)); } catch (e) { setHealth(friendlyError(e, locale)); } }}>{t.refreshHealth}</button>
           <code style={{ marginLeft: 8 }}>{health}</code></div>
       </div>
+
+      {tab === "dashboard" && (<section style={box} aria-label="dashboard">
+        <h2>{t.tabDashboard}</h2>
+        <DashboardPanel modal={modal} locale={locale} />
+      </section>)}
 
       {tab === "order" && (<section style={box}>
         <h2>{t.tabOrder}</h2>

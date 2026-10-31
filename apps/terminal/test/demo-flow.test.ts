@@ -75,6 +75,17 @@ describe("hackathon demo flow", () => {
     const ex = await modal.pagExecute("pag-1", "finance-op", "k-exec");
     expect((ex.data as { state: string }).state).toBe("completed");
   });
+  it("dashboard summary + recent + me (mocked, role-scoped)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "GET /api/me": { status: 200, body: { role: "operator", sandbox: true, liveMode: "OFF" } },
+      "GET /api/dashboard/summary": { status: 200, body: { tenant: "t", sandbox: true, fiat: { total: 1, byState: { pending: 1 } }, evm: { total: 0, byState: {} }, agreements: { total: 0, byState: {} } } },
+      "GET /api/dashboard/recent": { status: 200, body: { items: [{ kind: "fiat", id: "pay-1", state: "pending", detail: "d", ref: "" }], sandbox: true } },
+    }));
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "t", token: "tok" });
+    expect((await modal.me()).data.role).toBe("operator");
+    expect((await modal.dashboardSummary()).data.fiat.total).toBe(1);
+    expect((await modal.dashboardRecent({ kind: "fiat" })).data.items).toHaveLength(1);
+  });
   it("ai assistant + state explainer are advisory-only with validated flags (mocked)", async () => {
     vi.stubGlobal("fetch", mockFetch({
       "POST /api/ai/assistant": { status: 200, body: { advisoryOnly: true, validated: true, kind: "assistant", data: { answer: "a", topic: "general", actions: [], needsHuman: false }, notice: "n" } },

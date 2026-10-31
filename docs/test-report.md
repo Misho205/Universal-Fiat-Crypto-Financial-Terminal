@@ -1,5 +1,15 @@
 # Test report (living)
 
+## 2026-10-31 — User-facing app + persistent data layer (mocked; no live funds)
+- `pytest modal_backend/test_dashboard_auth.py` 3 passed: /me roles (operator/admin/anonymous,
+  no token echo), RBAC matrix (operator 403 on cancel/refund/execute/dispute; admin reaches
+  business gates), dashboard summary counts + recent kind/state/q filters + tenant isolation.
+- `pytest modal_backend/test_migrations.py` 2 passed: fresh apply (`001-003`), idempotent rerun,
+  all tables + 9 indexes present, validation rejects bad rows (id/tenant/chain).
+- `pnpm --filter @hybridpay/sdk test` 9 passed (me/dashboard methods, auth header).
+  `pnpm --filter @hybridpay/terminal test` 7 passed (dashboard/me mocked flow).
+- Full suite at push time: `pnpm build` 9/9, `pnpm test` 11/11, `pytest modal_backend/` all green.
+
 ## 2026-10-31 — M0+M1 scaffold (executed 17:05 UTC)
 - `pnpm test`: 10/10 suites PASS (domain 7, agreements 8, ledger 4, policies 4, adapters 3, terminal 1, worker 2, api 5).
 - API `tsc` build PASS. E2E `tests/e2e/mock-flow.mjs` vs live api PASS (order -> agreement -> accept -> eligible-methods -> quote -> instruction AUTHORIZED).

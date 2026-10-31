@@ -97,4 +97,17 @@ describe("ai", () => {
     const urls = (fn.mock.calls as unknown as [string][]) .map((cc) => cc[0]);
     expect(urls).toEqual(["http://m/api/ai/explain-crypto", "http://m/api/ai/explain-state", "http://m/api/ai/usage"]);
   });
+  it("me + dashboard summary/recent hit role-scoped endpoints", async () => {
+    const fn = mockFetchOnce(200, { role: "operator", sandbox: true });
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t", token: "tok" });
+    const me = await c.me();
+    expect(me.data.role).toBe("operator");
+    const [, opts] = fn.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
+    expect(opts.headers.Authorization).toBe("Bearer tok");
+    const fn2 = mockFetchOnce(200, { items: [], sandbox: true });
+    await c.dashboardRecent({ kind: "fiat", state: "pending", q: "pay-" });
+    const [url2] = fn2.mock.calls[0] as unknown as [string];
+    expect(url2).toMatch(/kind=fiat/);
+    expect(url2).toMatch(/state=pending/);
+  });
 });

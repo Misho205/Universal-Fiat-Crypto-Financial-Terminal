@@ -46,8 +46,7 @@ def tx_store(tx_id: str, record: dict[str, Any]) -> None:
 
 
 def tx_get(tx_id: str) -> dict[str, Any] | None:
-    conn = db._connect()
-    row = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    row = db._fetch_one("SELECT * FROM transactions WHERE id=?", (tx_id,))
     if not row:
         return None
     payload = json.loads(row["payload_json"] or "{}")

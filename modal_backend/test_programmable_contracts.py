@@ -14,6 +14,13 @@ from modal_backend import programmable
 
 TENANT = "pag-e2e"
 H = {"X-Tenant-Id": TENANT, "Authorization": "Bearer dev-shared-token"}
+ADMIN_TOKEN = "dev-admin-token"
+AH = {"X-Tenant-Id": TENANT, "Authorization": f"Bearer {ADMIN_TOKEN}"}
+
+
+def _admin(monkeypatch):
+    import modal_backend.config as cfg
+    monkeypatch.setattr(cfg, "API_ADMIN_TOKEN", ADMIN_TOKEN)
 
 TERMS = {"amountMinor": "2599", "currency": "EUR",
          "parties": ["merchant", "customer"],
@@ -46,7 +53,8 @@ def test_create_rejects_ai_bypass_and_custody_claims():
     assert _create(c, terms=bad_exec, key="ke").status_code == 422
 
 
-def test_full_lifecycle_with_roles_and_audit_chain():
+def test_full_lifecycle_with_roles_and_audit_chain(monkeypatch):
+    _admin(monkeypatch)
     c = _client()
     ag = _create(c).json()["agreementId"]
     # draft -> active requires creator role
@@ -66,10 +74,13 @@ def test_full_lifecycle_with_roles_and_audit_chain():
     assert ap["eligible"] is True and ap["state"] == "eligible_for_execution"
     # execute without executor role refused (eligibility != authorization)
     assert c.post(f"/api/contracts/programmable/{ag}/execute",
-                  json={"actor": "customer", "role": "party"}, headers=H).status_code == 403
+                  json={"actor": "customer", "role": "party"}, headers=AH).status_code == 403
+    # operator bearer cannot execute either (admin gate on top of executor role)
+    assert c.post(f"/api/contracts/programmable/{ag}/execute",
+                  json={"actor": "finance-op", "role": "executor"}, headers=H).status_code == 403
     ex = c.post(f"/api/contracts/programmable/{ag}/execute",
                 json={"actor": "finance-op", "role": "executor"},
-                headers={**H, "Idempotency-Key": "exec1"})
+                headers={**AH, "Idempotency-Key": "exec1"})
     assert ex.status_code == 200, ex.text
     body = ex.json()
     assert body["state"] == "completed" and body["sandbox"] is True
@@ -81,7 +92,8 @@ def test_full_lifecycle_with_roles_and_audit_chain():
                                                     "evaluate", "execute"]
 
 
-def test_condition_types_and_expiry_and_dispute():
+def test_condition_types_and_expiry_and_dispute(monkeypatch):
+    _admin(monkeypatch)
     c = _client()
     terms = {"amountMinor": "100", "currency": "EUR", "parties": ["m", "c", "arb"],
              "conditions": [{"type": "approvalThreshold", "approvers": ["c", "arb"], "threshold": 2},
@@ -108,14 +120,17 @@ def test_condition_types_and_expiry_and_dispute():
     c.post(f"/api/contracts/programmable/{ag}/approve",
            json={"actor": "arb", "role": "party"}, headers=H)
     assert c.get(f"/api/contracts/programmable/{ag}", headers=H).json()["eligible"] is True
-    # dispute freezes execution
+    # dispute freezes execution (admin gate; operator refused first)
     assert c.post(f"/api/contracts/programmable/{ag}/dispute",
-                  json={"actor": "c", "role": "party"}, headers=H).status_code == 200
+                  json={"actor": "c", "role": "party"}, headers=H).status_code == 403
+    assert c.post(f"/api/contracts/programmable/{ag}/dispute",
+                  json={"actor": "c", "role": "party"}, headers=AH).status_code == 200
     assert c.post(f"/api/contracts/programmable/{ag}/execute",
-                  json={"actor": "ops", "role": "executor"}, headers=H).status_code == 409
+                  json={"actor": "ops", "role": "executor"}, headers=AH).status_code == 409
 
 
-def test_expired_agreement_cannot_execute():
+def test_expired_agreement_cannot_execute(monkeypatch):
+    _admin(monkeypatch)
     c = _client()
     terms = dict(TERMS, expiresAt="2000-01-01T00:00:00Z")
     ag = _create(c, terms=terms, key="exp").json()["agreementId"]
@@ -124,7 +139,7 @@ def test_expired_agreement_cannot_execute():
     g = c.get(f"/api/contracts/programmable/{ag}", headers=H).json()
     assert g["state"] == "expired"
     assert c.post(f"/api/contracts/programmable/{ag}/execute",
-                  json={"actor": "ops", "role": "executor"}, headers=H).status_code in (409, 410)
+                  json={"actor": "ops", "role": "executor"}, headers=AH).status_code in (409, 410)
 
 
 def test_unit_evaluators_and_chain_tamper():

@@ -1,0 +1,19 @@
+/* HybridPay Terminal — responsive + accessible base styles (no framework). */
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; }
+main { width: 100%; max-width: 760px; margin: 0 auto; padding: 16px; }
+input, select, textarea, button { font-size: 1rem; max-width: 100%; }
+input, textarea, select { padding: 6px 8px; }
+button { padding: 6px 12px; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.6; }
+:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
+pre, code { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  main { padding: 12px; }
+  input, textarea { width: 100%; }
+  button { margin-bottom: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

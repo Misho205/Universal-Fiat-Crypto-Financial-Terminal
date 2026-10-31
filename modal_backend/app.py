@@ -21,14 +21,21 @@ IMAGE = (
         "pydantic==2.10.4",
         "httpx==0.28.1",
         "stripe==11.3.0",
+        "psycopg2-binary==2.9.10",
     )
 )
 
 app = modal.App("hybridpay-sandbox", image=IMAGE)
 
+# Persistent volume: SQLite file lives here (/mnt/data/hybridpay.db), NOT on the
+# ephemeral container filesystem. Prefer external Postgres via DATABASE_URL for
+# production; the Volume is the durable default. Create once, reuse across deploys.
+data_volume = modal.Volume.from_name("hybridpay-data", create_if_missing=True)
+
 
 @app.function(
     secrets=[modal.Secret.from_name("hybridpay-test")],
+    volumes={"/mnt/data": data_volume},
     cpu=0.5,
     memory=512,
     timeout=60,

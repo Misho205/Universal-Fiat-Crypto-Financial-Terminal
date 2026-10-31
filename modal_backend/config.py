@@ -22,6 +22,10 @@ _raw_origins = _get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 API_SHARED_TOKEN: str = _get("API_SHARED_TOKEN", "")
+# Admin token (sensitive operations: cancel/refund/dispute/execute). If empty,
+# admin endpoints fail closed for token holders (dev-caller bypass only when NO
+# tokens are configured at all, i.e. bare local dev).
+API_ADMIN_TOKEN: str = _get("API_ADMIN_TOKEN", "")
 # Meta Model API key. Primary name per integration spec is MODEL_API_KEY;
 # META_MODEL_API_KEY is accepted as a legacy fallback. Never logged, never
 # sent to the frontend; injected via the `hybridpay-test` Modal Secret.

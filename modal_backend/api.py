@@ -34,7 +34,7 @@ from pydantic import BaseModel, Field
 from . import ai, config, contracts, meta_client, payments, programmable, providers, store
 from . import db as _db
 from . import evm as evm_mod
-from .auth import require_auth, require_tenant
+from .auth import caller_role, require_admin, require_auth, require_tenant
 from .db import tx_get as db_tx_get, tx_list as db_tx_list, tx_upsert as db_tx_upsert
 from .logging_util import get_logger, log_event
 from .payments import ProviderError, get_fiat_provider, verify_stripe_webhook
@@ -429,7 +429,8 @@ async def fiat_list(tenant: str = Depends(require_tenant),
 
 @app.post("/api/payments/fiat/{payment_id}/cancel")
 async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+                      caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Admin only: cancels a non-terminal payment (money movement)."""
     rec = _load_owned(payment_id, tenant)
     if rec["state"] not in ("created", "pending", "unknown"):
         raise HTTPException(status_code=409, detail=f"cannot cancel from state {rec['state']}")
@@ -445,7 +446,8 @@ async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
 
 @app.post("/api/payments/fiat/{payment_id}/refund")
 async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+                      caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Admin only: refunds a succeeded payment (money movement)."""
     rec = _load_owned(payment_id, tenant)
     if rec["state"] != "succeeded":
         raise HTTPException(status_code=409, detail="only succeeded payments can be refunded")
@@ -483,9 +485,7 @@ async def stripe_webhook(request: Request, caller: str = Depends(require_auth)) 
                  "payment_intent.canceled": "canceled"}.get(etype)
     updated = 0
     if new_state and event.get("payment_intent"):
-        conn = _db._connect()
-        rows = conn.execute("SELECT id, tenant FROM transactions WHERE provider_ref=?",
-                            (event["payment_intent"],)).fetchall()
+        rows = _db.tx_by_provider_ref(event["payment_intent"])
         for r in rows:
             current = db_tx_get(r["id"], r["tenant"])
             if current and current["state"] not in ("refunded", "succeeded"):
@@ -729,11 +729,11 @@ async def pag_evidence(agreement_id: str, body: PagEvidenceIn, tenant: str = Dep
 
 @app.post("/api/contracts/programmable/{agreement_id}/execute")
 async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_auth),
+                      caller: str = Depends(require_admin),
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
-    """Execute an ELIGIBLE agreement via the fiat sandbox provider. Two gates:
-    deterministic eligibility AND explicit human authorization (role executor).
-    Eligibility alone never triggers payment."""
+    """Execute an ELIGIBLE agreement via the fiat sandbox provider. Three gates:
+    deterministic eligibility AND explicit human authorization (role executor) AND
+    admin bearer token. Eligibility alone never triggers payment."""
     ag = _load_pag(agreement_id, tenant)
     if body.role != "executor":
         raise HTTPException(status_code=403, detail="execution requires human executor authorization")
@@ -772,7 +772,8 @@ async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends
 
 @app.post("/api/contracts/programmable/{agreement_id}/cancel")
 async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
-                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+                     caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Admin only (irreversible terminal state)."""
     ag = _load_pag(agreement_id, tenant)
     ok, why = programmable.can_transition(ag["state"], "canceled", body.role)
     if not ok:
@@ -784,7 +785,8 @@ async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(
 
 @app.post("/api/contracts/programmable/{agreement_id}/dispute")
 async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+                      caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Admin only (freezes execution). Raising party identity is recorded in history."""
     ag = _load_pag(agreement_id, tenant)
     ok, why = programmable.can_transition(ag["state"], "disputed", body.role)
     if not ok:
@@ -799,3 +801,64 @@ async def pag_list(tenant: str = Depends(require_tenant),
                    caller: str = Depends(require_auth)) -> dict[str, Any]:
     return {"agreements": _db.pag_list(tenant), "sandbox": True,
             "disclosure": programmable.DISCLOSURE}
+
+
+# ---------- identity + unified dashboard (operator-readable) ----------
+
+@app.get("/api/me")
+async def me(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Who am I: role label for UI badges. No token is ever echoed back."""
+    return {"role": caller_role(authorization), "sandbox": True,
+            "liveMode": config.live_mode_status()}
+
+
+@app.get("/api/dashboard/summary")
+async def dashboard_summary(tenant: str = Depends(require_tenant),
+                            caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Tenant-scoped counts by state across fiat, EVM, and agreements (single call)."""
+    from collections import Counter
+    fiat = db_tx_list(tenant, limit=1000)
+    evm_items = _db.evm_list(tenant, limit=1000)
+    pags = _db.pag_list(tenant, limit=1000)
+    by_state = lambda items, key="state": dict(Counter(p.get(key, "?") for p in items))
+    log_event(logger, "dashboard.summary", tenant=tenant, caller=caller)
+    return {"tenant": tenant, "sandbox": True,
+            "fiat": {"total": len(fiat), "byState": by_state(fiat)},
+            "evm": {"total": len(evm_items), "byState": by_state(evm_items),
+                    "chainId": evm_mod.SEPOLIA_CHAIN_ID},
+            "agreements": {"total": len(pags), "byState": by_state(pags)}}
+
+
+@app.get("/api/dashboard/recent")
+async def dashboard_recent(tenant: str = Depends(require_tenant),
+                           caller: str = Depends(require_auth),
+                           kind: str = "all", state: str = "", q: str = "",
+                           limit: int = 50) -> dict[str, Any]:
+    """Combined, filterable history: kind in {all,fiat,evm,agreement}, optional
+    state substring and id/providerRef substring filters. Newest first."""
+    lim = max(1, min(limit, 200))
+    items: list[dict[str, Any]] = []
+    if kind in ("all", "fiat"):
+        for p in db_tx_list(tenant, limit=lim):
+            items.append({"kind": "fiat", "id": p["id"], "state": p["state"],
+                          "detail": f'{p.get("amountMinor", "?")} {p.get("currency", "")} via {p.get("provider", "")}',
+                          "ref": p.get("providerRef", "")})
+    if kind in ("all", "evm"):
+        for p in _db.evm_list(tenant, limit=lim):
+            items.append({"kind": "evm", "id": p["id"], "state": p["state"],
+                          "detail": f'{p.get("value_wei", "?")} wei to {p.get("to", "")}',
+                          "ref": p.get("tx_hash", ""),
+                          "explorer": evm_mod.explorer_link(p["tx_hash"]) if p.get("tx_hash") else None})
+    if kind in ("all", "agreement"):
+        for p in _db.pag_list(tenant, limit=lim):
+            items.append({"kind": "agreement", "id": p["id"], "state": p["state"],
+                          "detail": f"v{p.get('version', 1)} updated {p.get('updatedAt', '')}",
+                          "ref": ""})
+    if state:
+        items = [i for i in items if state.lower() in i["state"].lower()]
+    if q:
+        ql = q.lower()
+        items = [i for i in items if ql in i["id"].lower() or ql in i["ref"].lower()
+                 or ql in i["detail"].lower()]
+    log_event(logger, "dashboard.recent", tenant=tenant, caller=caller, count=len(items))
+    return {"items": items[:lim], "sandbox": True}

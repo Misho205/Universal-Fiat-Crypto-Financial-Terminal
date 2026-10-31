@@ -1,6 +1,7 @@
 # IMPLEMENTATION_STATUS.md — Universal Hybrid Payment Terminal
 
-Generated: 2026-10-31 (UTC). Scope: Modal startup fix + fiat sandbox E2E + EVM Sepolia + programmable contracts.
+Generated: 2026-10-31 (UTC). Scope: user-facing app + persistent data layer
+(dashboard, auth/RBAC, Postgres/Volume durability, migrations).
 Policy: no invented results — every claim below cites an executed command or a file.
 
 ## 1. Modal startup failure — reproduction & fix

@@ -26,6 +26,8 @@ export const dict = {
     tabAssistant: "AI Assistant", askPlaceholder: "Ask about payments, agreements, wallet, fees…",
     ask: "Ask", whyState: "Why this state?", explainCrypto: "Explain (AI)",
     usageLabel: "AI usage", validatedLabel: "validated", stubLabel: "offline stub",
+    tabDashboard: "Dashboard", tokenLabel: "API token (memory only)", logout: "Log out",
+    signIn: "Use token",
   },
   bg: {
     newOrder: "Нова поръчка", amount: "Сума (EUR)", create: "Създай и покажи QR",
@@ -54,6 +56,8 @@ export const dict = {
     tabAssistant: "AI Асистент", askPlaceholder: "Попитайте за плащания, споразумения, портфейл, такси…",
     ask: "Попитай", whyState: "Защо това състояние?", explainCrypto: "Обясни (AI)",
     usageLabel: "AI използване", validatedLabel: "валидиран", stubLabel: "офлайн заготовка",
+    tabDashboard: "Табло", tokenLabel: "API токен (само в паметта)", logout: "Изход",
+    signIn: "Вход с токен",
   },
 } as const;
 export type Locale = keyof typeof dict;

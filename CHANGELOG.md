@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-31 — User-facing app + persistent data layer
+- Unified Dashboard tab (default): summary cards + filterable combined history
+  (`/api/dashboard/summary|recent`, operator-readable, tenant-scoped).
+- Auth: operator/admin bearer roles, server-enforced (admin-only: fiat cancel/refund,
+  agreement execute/cancel/dispute) + `/api/me` role badge; memory-only session token
+  + logout in UI; no secrets or payment creds in browser/DB.
+- Durability: Postgres via `DATABASE_URL` (psycopg2) or SQLite on Modal Volume
+  `/mnt/data` (auto-default; never ephemeral FS); versioned migrations
+  (`modal_backend/migrations/001-003`, `schema_migrations`, idempotent `migrate()`);
+  indexes for tenant/state/provider paths; fail-fast validation.
+- Frontend a11y/responsive: viewport, responsive CSS, focus-visible, aria-live,
+  labelled filters, keyboard-operable tabs; improved UI preserved (no rewrite).
+- Tests: `test_dashboard_auth.py` (RBAC matrix, /me, summary/recent filters, isolation),
+  `test_migrations.py` (fresh apply, idempotent rerun, indexes, validation).
+- Docs: `docs/database.md` (env, Volume, Postgres, migrations, backups).
+- Full suite green (see test report). No deploy, no live funds.
+
 ## 2026-10-31 — Meta Muse Spark AI completion
 - New endpoints: `/api/ai/explain-crypto`, `/api/ai/explain-state`, `/api/ai/assistant`,
   `/api/ai/usage` (counters: calls/fallbacks/tokens); explicit NOT-certified-fraud disclaimer;

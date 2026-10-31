@@ -21,7 +21,12 @@ modal secret list      # verify access
 ```
 modal secret create hybridpay-test \
   API_SHARED_TOKEN="$(openssl rand -hex 24)" \
+  API_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+  HYBRIDPAY_DB_PATH=/mnt/data/hybridpay.db \
+  DATABASE_URL="" \
   STRIPE_SECRET_KEY_TEST="" \
+  STRIPE_WEBHOOK_SECRET_TEST="" \
+  BTCPAY_URL_TEST="http://localhost:23000" \
   STRIPE_WEBHOOK_SECRET_TEST="" \
   BTCPAY_URL_TEST="http://localhost:23000" \
   BTCPAY_API_KEY_TEST="" \
