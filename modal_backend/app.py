@@ -46,7 +46,8 @@ def fastapi_app():  # type: ignore[no-untyped-def]
     cpu=0.25,
     memory=256,
     timeout=60,
-    schedule=modal.Period(minutes=5),
+    # No schedule: on-demand reconcile only (cost control — no idle/scheduled jobs).
+    # Operator triggers via Modal dashboard or POST /api/reconcile (apps/api) when needed.
 )
 def reconcile_tick() -> dict[str, str]:
     """UNKNOWN sweep placeholder: production queries apps/api reconcile endpoint."""

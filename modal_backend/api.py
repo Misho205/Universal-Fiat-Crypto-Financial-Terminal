@@ -104,7 +104,8 @@ def _ai_or_429(fn, *args: Any) -> dict[str, Any]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "liveMode": "OFF", "sandbox": True, "ts": int(time.time())}
+  mode = config.live_mode_status()
+  return {"ok": True, "liveMode": mode, "sandbox": mode != "ON-APPROVED", "ts": int(time.time())}
 
 
 @app.post("/api/ai/analyze")

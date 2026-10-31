@@ -1,0 +1,49 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ModalBackendClient, HybridPayClient } from "@hybridpay/sdk";
+
+// Hackathon demo workflow E2E (mocked network): order -> checkout -> fiat simulate -> status -> contract validate.
+function mockFetch(routes: Record<string, { status: number; body: unknown }>) {
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    const u = new URL(url, "http://x");
+    const key = `${init?.method ?? "GET"} ${u.pathname}`;
+    const hit = routes[key];
+    if (!hit) return { ok: false, status: 404, json: async () => ({ detail: "not found" }) };
+    return { ok: hit.status < 400, status: hit.status, json: async () => hit.body };
+  });
+}
+
+beforeEach(() => vi.unstubAllGlobals());
+
+describe("hackathon demo flow", () => {
+  it("order -> qr -> fiat sandbox -> status -> contract ok", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "POST /v1/orders": { status: 201, body: { id: "ord-demo" } },
+      "POST /v1/orders/ord-demo/checkout-token": { status: 201, body: { token: "tok", qrPayload: "hybridpay://pay/tok" } },
+      "POST /api/payments/fiat/simulate": { status: 201, body: { transactionId: "tx-demo", state: "AUTHORIZED", sandbox: true } },
+      "GET /api/transactions/tx-demo": { status: 200, body: { transactionId: "tx-demo", state: "AUTHORIZED", sandbox: true } },
+      "POST /api/contracts/validate": { status: 200, body: { ok: true, errors: [], versionHash: "abc" } },
+    }));
+    const nest = new HybridPayClient({ baseUrl: "http://nest", tenantId: "demo-tenant" });
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "demo-tenant" });
+    const o = await nest.createOrder({ storeId: "s1", denomination: "fiat:EUR", totalMinor: "1000" }, "demo-key-1");
+    expect(o.status).toBe(201);
+    const tok = await nest.checkoutToken("ord-demo", 1);
+    expect((tok.data as { qrPayload: string }).qrPayload).toMatch(/^hybridpay:\/\//);
+    const pay = await modal.fiatSimulate({ amountMinor: "1000", instructionId: "demo-ins" }, "demo-key-2");
+    expect(pay.data.sandbox).toBe(true);
+    const st = await modal.txStatus("tx-demo");
+    expect(st.data.state).toBe("AUTHORIZED");
+    const c = await modal.validateContract({ amountMinor: "1000" });
+    expect(c.data.ok).toBe(true);
+  });
+  it("duplicate submit uses stable idempotency key (no double charge)", async () => {
+    const fn = mockFetch({ "POST /api/payments/fiat/simulate": { status: 201, body: { transactionId: "tx-1", state: "AUTHORIZED", sandbox: true } } });
+    vi.stubGlobal("fetch", fn);
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "t" });
+    const stableKey = "ui-fixed-key";
+    await modal.fiatSimulate({ amountMinor: "100", instructionId: "a" }, stableKey);
+    await modal.fiatSimulate({ amountMinor: "100", instructionId: "a" }, stableKey);
+    const keys = fn.mock.calls.map((c) => (c[1] as RequestInit & { headers: Record<string, string> }).headers["Idempotency-Key"]);
+    expect(keys).toEqual([stableKey, stableKey]);
+  });
+});

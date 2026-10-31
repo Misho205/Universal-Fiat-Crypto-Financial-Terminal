@@ -1,11 +1,14 @@
 """HybridPay Modal backend — central configuration (no secrets in source).
 
 All secrets come from environment / Modal Secrets at runtime.
-Sandbox and testnet only. LIVE_MODE must remain "false".
+Default is sandbox/testnet. LIVE mode exists ONLY behind a signed approval
+file (LIVE_APPROVAL_FILE) + explicit live credentials — absent in hackathon builds,
+so every live path fails closed. See docs/live-mode.md.
 """
 from __future__ import annotations
 
 import os
+import pathlib
 
 
 def _get(name: str, default: str = "") -> str:
@@ -41,8 +44,33 @@ BTCPAY_STORE_ID_TEST: str = _get("BTCPAY_STORE_ID_TEST", "")
 
 MODAL_SECRET_NAME = "hybridpay-test"
 
+# LIVE gate: LIVE_MODE=true alone NEVER enables money movement. A signed
+# operational approval file must exist at LIVE_APPROVAL_FILE (e.g. /run/secrets/live-approval.json)
+# AND live provider credentials must be present. Hackathon/demo builds ship with neither.
+LIVE_APPROVAL_FILE: str = _get("LIVE_APPROVAL_FILE", "")
+STRIPE_SECRET_KEY_LIVE: str = _get("STRIPE_SECRET_KEY_LIVE", "")
+BTCPAY_API_KEY_LIVE: str = _get("BTCPAY_API_KEY_LIVE", "")
+
+
+def live_approved() -> bool:
+  """True only when LIVE_MODE=true AND a non-empty approval file exists."""
+  if not LIVE_MODE or not LIVE_APPROVAL_FILE:
+    return False
+  try:
+    return pathlib.Path(LIVE_APPROVAL_FILE).stat().st_size > 0
+  except OSError:
+    return False
+
+
+def live_mode_status() -> str:
+  """OFF (default) | BLOCKED (requested but unapproved) | ON-APPROVED (all gates pass)."""
+  if not LIVE_MODE:
+    return "OFF"
+  return "ON-APPROVED" if live_approved() else "BLOCKED"
+
 
 def assert_sandbox() -> None:
-    """Fail closed if anyone tries to enable live mode."""
-    if LIVE_MODE:
-        raise RuntimeError("LIVE_MODE is enabled — refused in sandbox/testnet backend.")
+  """Fail closed: sandbox paths refuse to run when live was requested but not approved;
+  approved-live paths are handled by dedicated live executors (not present in demo)."""
+  if LIVE_MODE and not live_approved():
+    raise RuntimeError("LIVE_MODE requested without valid LIVE_APPROVAL_FILE — refused (fail closed).")
