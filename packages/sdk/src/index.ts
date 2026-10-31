@@ -202,12 +202,12 @@ export class ModalBackendClient {
     return this.request<TxStatus>(`/api/transactions/${encodeURIComponent(transactionId)}`, { headers: this.headers() });
   }
   aiExplain(transaction: unknown) {
-    return this.request<{ advisoryOnly: boolean; explanation: string }>(`/api/ai/explain-transaction`, {
+    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: { summary: string; [k: string]: unknown }; notice: string }>(`/api/ai/explain-transaction`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ transaction }),
     });
   }
   aiFraud(transaction: unknown) {
-    return this.request<{ advisoryOnly: boolean; level: string; signals: string[] }>(`/api/ai/fraud-signals`, {
+    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: { riskLevel: string; scoreBps: number; indicators: { code: string; detail: string; weightBps?: number }[] }; notice: string }>(`/api/ai/fraud-signals`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ transaction }),
     });
   }

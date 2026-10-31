@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-31 — Design system + Banking/Personal workspaces
+- `FRONTEND_IMPLEMENTATION_PLAN.md`: audit (36 Modal + 12 Nest endpoints), feature matrix,
+  architecture, token/component specs, auth/RBAC, missing-backend list, P0-P2.
+- Stack: Tailwind v3 + CSS-variable tokens (light/dark) + shadcn-style ui + Lucide +
+  next-themes + recharts; `/design-system` showcase with a11y contract (WCAG 2.2 AA target).
+- `/banking` (admin-gated: overview charts, tx table + ConfirmDialog-gated cancel/refund,
+  agreements, risk, assistant) + `/personal` (pay, activity, assistant). Existing routes untouched.
+- Tests: terminal 11 (new `design-system.test.ts`). Full suite green. No deploy, no live funds.
+
 ## 2026-10-31 — User-facing app + persistent data layer
 - Unified Dashboard tab (default): summary cards + filterable combined history
   (`/api/dashboard/summary|recent`, operator-readable, tenant-scoped).

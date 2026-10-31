@@ -1,41 +1,87 @@
-/* HybridPay Terminal — responsive + accessible modern theme (no framework). */
-:root { color-scheme: light; --ink: #0f172a; --muted: #64748b; --line: #e5e7eb; --card: #ffffff; --bg: #f6f7fb; --brand1: #4f46e5; --brand2: #7c3aed; }
-* { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
-main { width: 100%; max-width: 880px; margin: 0 auto; padding: 16px 16px 48px; }
-input, select, textarea, button { font-size: 1rem; max-width: 100%; }
-input, textarea, select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-button:disabled { cursor: not-allowed; opacity: 0.6; }
-:focus-visible { outline: 3px solid #2563eb; outline-offset: 2px; }
-pre, code { overflow-wrap: anywhere; }
-pre.ok { white-space: pre-wrap; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 12px; border-radius: 10px; }
-pre.err { white-space: pre-wrap; background: #fef2f2; border: 1px solid #fecaca; padding: 12px; border-radius: 10px; }
-.muted { color: var(--muted); }
-code.qr { word-break: break-all; display: block; background: #eef2ff; padding: 12px; border-radius: 10px; }
-button.link { background: none; border: none; color: var(--brand1); cursor: pointer; text-decoration: underline; padding: 0; }
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* hero */
-.hero { background: linear-gradient(135deg, #1e1b4b, #4f46e5 55%, #7c3aed); color: #fff; border-radius: 20px; padding: 28px 24px; box-shadow: 0 8px 24px rgba(79,70,229,.25); }
+/* HybridPay design tokens — single source of truth (mirrored in src/tokens.ts).
+   Restrained institutional palette. AA contrast on both themes. */
+:root {
+  color-scheme: light;
+  --bg: 246 247 251;
+  --surface: 255 255 255;
+  --line: 229 231 235;
+  --ink: 15 23 42;
+  --muted: 100 116 139;
+  --brand-50: 238 242 255;
+  --brand-100: 199 210 254;
+  --brand-600: 79 70 229;
+  --brand-700: 67 56 202;
+  --brand-900: 30 27 75;
+  --ok: 22 101 52;
+  --ok-bg: 240 253 244;
+  --warn: 146 64 14;
+  --warn-bg: 255 251 235;
+  --danger: 153 27 27;
+  --danger-bg: 254 242 242;
+  --info: 30 64 175;
+  --info-bg: 239 246 255;
+}
+.dark {
+  color-scheme: dark;
+  --bg: 9 12 22;
+  --surface: 17 24 39;
+  --line: 51 65 85;
+  --ink: 226 232 240;
+  --muted: 148 163 184;
+  --brand-50: 30 27 75;
+  --brand-100: 67 56 202;
+  --brand-600: 129 140 248;
+  --brand-700: 165 180 252;
+  --brand-900: 238 242 255;
+  --ok: 110 231 183;
+  --ok-bg: 6 40 26;
+  --warn: 253 224 71;
+  --warn-bg: 42 32 8;
+  --danger: 252 165 165;
+  --danger-bg: 45 12 12;
+  --info: 147 197 253;
+  --info-bg: 12 32 68;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: rgb(var(--bg)); color: rgb(var(--ink)); }
+main { width: 100%; max-width: 1080px; margin: 0 auto; padding: 16px 16px 48px; }
+input, select, textarea, button { font-size: 1rem; max-width: 100%; }
+input, textarea, select { padding: 8px 10px; border: 1px solid rgb(var(--line)); border-radius: 10px; background: rgb(var(--surface)); color: rgb(var(--ink)); }
+button:disabled { cursor: not-allowed; opacity: 0.6; }
+:focus-visible { outline: 3px solid #2566eb; outline-offset: 2px; }
+pre, code { overflow-wrap: anywhere; }
+pre.ok { white-space: pre-wrap; background: rgb(var(--ok-bg)); border: 1px solid rgb(var(--ok) / 0.35); padding: 12px; border-radius: 10px; }
+pre.err { white-space: pre-wrap; background: rgb(var(--danger-bg)); border: 1px solid rgb(var(--danger) / 0.35); padding: 12px; border-radius: 10px; }
+.muted { color: rgb(var(--muted)); }
+code.qr { word-break: break-all; display: block; background: rgb(var(--brand-50)); padding: 12px; border-radius: 10px; }
+button.link { background: none; border: none; color: rgb(var(--brand-600)); cursor: pointer; text-decoration: underline; padding: 0; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* legacy hero/tabs (home page) — kept working, themed via tokens */
+.hero { background: #1e1b4b; color: #fff; border-radius: 20px; padding: 28px 24px; }
+.dark .hero { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); color: rgb(var(--ink)); }
 .hero-inner { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
 .brand { font-size: 1.6rem; font-weight: 800; letter-spacing: 0.5px; }
 .tagline { opacity: 0.92; margin: 8px 0 0; max-width: 560px; }
 .hero-side { display: flex; gap: 8px; align-items: center; }
 .live-badge { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); padding: 6px 12px; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
+.dark .live-badge { background: rgb(var(--warn-bg)); border-color: rgb(var(--warn)); color: rgb(var(--warn)); }
 .lang { background: #fff; color: #1e1b4b; border: none; border-radius: 999px; padding: 8px 16px; font-weight: 700; cursor: pointer; }
 .sandbox { opacity: 0.85; font-size: 0.85rem; margin: 12px 0 0; }
-
-/* tabs */
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-.tab { background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
+.tab { background: rgb(var(--surface)); color: rgb(var(--ink)); border: 1px solid rgb(var(--line)); border-radius: 999px; padding: 8px 14px; cursor: pointer; font-weight: 600; }
 .tab.active { background: #1e1b4b; color: #fff; border-color: #1e1b4b; }
-
-/* forms + assets */
+.dark .tab.active { background: rgb(var(--brand-100)); border-color: rgb(var(--brand-100)); color: #fff; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .asset-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
-.chip { border: 1px solid var(--line); background: #f8fafc; border-radius: 999px; padding: 6px 12px; cursor: pointer; font-weight: 600; }
+.chip { border: 1px solid rgb(var(--line)); background: rgb(var(--surface)); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-weight: 600; color: rgb(var(--ink)); }
 .chip.active { background: #1e1b4b; color: #fff; border-color: #1e1b4b; }
 .chip.static { cursor: default; }
-
 h2 { margin: 4px 0 12px; }
 
 @media (max-width: 640px) {

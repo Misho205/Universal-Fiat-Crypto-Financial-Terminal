@@ -1,5 +1,18 @@
 # Test report (living)
 
+## 2026-10-31 — Design system + Banking/Personal workspaces (mocked; no live funds)
+- New: Tailwind v3 + CSS-variable tokens (light/dark) + shadcn-style ui primitives
+  (button/card/badge/status-badge/money/table/dialog/input/select/textarea/alert/
+  skeleton/empty-state/tabs/confirm-dialog/theme-toggle/chart) + Lucide + recharts
+  with SR table fallbacks + `/design-system` showcase.
+- New routes: `/banking` (admin-gated: overview charts, tx table w/ confirm+cancel/refund
+  via ConfirmDialog, agreements, risk, assistant), `/personal` (pay, activity, assistant).
+  Existing `/` + `/simulator` preserved unchanged in behavior.
+- `pnpm --filter @hybridpay/terminal test` 11 passed (incl. `design-system.test.ts`:
+  money/wei formatting, state→tone coverage, i18n parity).
+- A11y contract documented in showcase (WCAG 2.2 AA target): text+shape statuses,
+  keyboard tabs/dialogs, live regions, focus-visible, chart table fallbacks, 4.5:1 text.
+
 ## 2026-10-31 — Public terminal frontend (modern UI + currencies, verified remotely)
 - New design: gradient hero, currency chips/selects (12 fiat: EUR USD GBP BGN CHF SEK NOK DKK PLN CZK HUF RON;
   crypto: BTC-regtest + Sepolia ETH), responsive cards, BG/EN.

@@ -14,7 +14,11 @@ for hackathon demos.
   **EVM Sepolia** (wallet connect via viem, sign-in-wallet, receipt + explorer links),
   **Agreements** (programmable fiat contracts: create/monitor/execute), contract validator,
   transaction status + **AI assistant** (validated, fallback-safe, read-only), visual **simulator** (`/simulator`) for human trial tests.
-  Responsive (mobile/desktop), keyboard-focus visible, `aria-live` states, memory-only session token + role badge.
+  Design system (`/design-system` showcase): Tailwind + tokens, light/dark themes, shadcn-style
+  components, Lucide icons, accessible charts. **Banking Workspace** (`/banking`, admin-gated:
+  overview, transactions, agreements, risk, audit, assistant) + **Personal Workspace**
+  (`/personal`: pay, my activity, assistant). Responsive (mobile/desktop), keyboard-focus visible,
+  `aria-live` states, memory-only session token + role badge. Architecture: `FRONTEND_IMPLEMENTATION_PLAN.md`.
 - **NestJS API** (`apps/api`): modular monolith, system of record (PostgreSQL + Prisma migrations).
 - **Worker** (`apps/worker`): Temporal activities/workflows (provider calls live outside DB tx).
 - **Modal backend** (`modal_backend/`, FastAPI): stateless executor + **advisory AI**
