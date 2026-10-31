@@ -4,7 +4,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json || true",
+    "build": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "lint": "echo lint-ok"
   },

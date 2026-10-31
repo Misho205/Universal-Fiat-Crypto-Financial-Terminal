@@ -8,3 +8,4 @@ coverage/
 __pycache__/
 .pytest_cache/
 *.zip
+next-env.d.ts

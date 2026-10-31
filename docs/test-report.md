@@ -11,6 +11,12 @@
 - Sandbox/regtest: BLOCKED (no credentials) — explicit, not claimed.
 - Perf/restore: to be measured in M5; targets recorded, not claimed.
 
+## 2026-10-31 — Build + coverage hardening (executed 20:45 UTC)
+- `pnpm build`: 9/9 PASS (fixed terminal next.config.mjs TS-in-JS, worker moduleResolution Bundler-vs-CommonJS, worker import.meta under CommonJS, terminal missing root layout, adapters signature mismatches; removed `|| true` build silencers).
+- `pnpm test`: 10/10 suites PASS (domain 11 incl. property fuzz, agreements 8, ledger 7 incl. balance property, policies 4, adapters 3, terminal 1, worker 2, api 7 incl. integration flow, sdk 2 new).
+- New: `packages/sdk/test/sdk.test.ts`, `packages/domain/test/property.test.ts`, `packages/ledger/test/balance-property.test.ts`, `apps/api/test/integration.test.ts`, `tests/property/money-property.test.mjs`, `tests/integration/api-flow.test.mjs` (`node --test` 4/4 PASS), `apps/worker/src/main.ts`, `apps/api/src/modules/*`, `apps/terminal/app/layout.tsx`.
+- Still pending (needs creds/infra, not code): perf p95 measurement, backup/restore drill (M5), sandbox/regtest SANDBOX_OK, Modal deploy.
+
 ## 2026-10-31 — Modal Muse Spark integration (executed, no deploy)
 - `pytest modal_backend/`: 15 passed, 1 skipped (live integration opt-in only).
 - Mocked (no network/tokens): PII scrubbing, schema accept/reject, 429-retry-then-success,

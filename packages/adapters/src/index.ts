@@ -50,15 +50,15 @@ export class MockAdapter implements PaymentAdapter {
     if (s === "failure") return { ok: false, code: "PROVIDER_ERROR", message: "mock capture failed" };
     return { ok: true, providerRef: ref, state: s === "dispute" ? "DISPUTED" : "SETTLED" };
   }
-  async cancel(ctx: AdapterContext, ref: string): Promise<OpResult> { return { ok: true, providerRef: ref, state: "CANCELLED" }; }
-  async refund(ctx: AdapterContext, ref: string): Promise<OpResult> { return { ok: true, providerRef: `${ref}-refund`, state: "REFUNDED" }; }
+  async cancel(ctx: AdapterContext, ref: string): Promise<OpResult> { void ctx; return { ok: true, providerRef: ref, state: "CANCELLED" }; }
+  async refund(ctx: AdapterContext, ref: string): Promise<OpResult> { void ctx; return { ok: true, providerRef: `${ref}-refund`, state: "REFUNDED" }; }
   async collect(ctx: AdapterContext): Promise<OpResult> { return this.authorize(ctx); }
   async transfer(ctx: AdapterContext, d: string): Promise<OpResult> { return { ok: true, providerRef: `mock-tx-${ctx.instructionId}`, state: `TRANSFERRED:${d}` }; }
   async payout(ctx: AdapterContext, d: string): Promise<OpResult> { return this.transfer(ctx, d); }
-  async recurring(): Promise<OpResult> { return unsupported(); }
-  async conditionalRelease(): Promise<OpResult> { return unsupported(); }
-  async exchange(): Promise<OpResult> { return unsupported(); }
-  verifyWebhook(): boolean { return true; }
+  async recurring(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async conditionalRelease(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async exchange(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  verifyWebhook(rawBody: string, signature: string, secret: string): boolean { void rawBody; void signature; void secret; return true; }
 }
 
 /** Stripe sandbox adapter (Direct charges). Without TEST key -> BLOCKED_NO_CREDENTIALS. */
@@ -94,9 +94,9 @@ export class StripeSandboxAdapter implements PaymentAdapter {
     return { ok: true, providerRef: `tr_test_${ctx.instructionId}`, state: `TRANSFERRED:${d}` };
   }
   async payout(ctx: AdapterContext, d: string): Promise<OpResult> { return this.transfer(ctx, d); }
-  async recurring(): Promise<OpResult> { return unsupported(); }
-  async conditionalRelease(): Promise<OpResult> { return unsupported(); }
-  async exchange(): Promise<OpResult> { return unsupported(); }
+  async recurring(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async conditionalRelease(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async exchange(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
   verifyWebhook(rawBody: string, signature: string, secret: string): boolean {
     // Real: stripe.webhooks.constructEvent. Here: constant-time compare stub requiring secret match.
     return Boolean(secret) && signature.length > 0 && rawBody.length >= 0;
@@ -118,12 +118,12 @@ export class BtcPayRegtestAdapter implements PaymentAdapter {
     return { ok: true, providerRef: `btcpay-inv-${ctx.instructionId}`, state: "INVOICE_PENDING" };
   }
   async authorize(ctx: AdapterContext): Promise<OpResult> { return this.collect(ctx); }
-  async capture(): Promise<OpResult> { return unsupported(); } // on-chain has no capture; settlement via confirmations
+  async capture(ctx: AdapterContext, _ref: string): Promise<OpResult> { void ctx; void _ref; return unsupported(); } // on-chain has no capture; settlement via confirmations
   async cancel(ctx: AdapterContext, ref: string): Promise<OpResult> {
     const b = this.blocked(); if (b) return b;
     return { ok: true, providerRef: ref, state: "CANCELLED" };
   }
-  async refund(ctx: AdapterContext): Promise<OpResult> {
+  async refund(ctx: AdapterContext, _ref: string): Promise<OpResult> {
     // Crypto refund = new authorized transfer to verified recipient; MVP emits signing request.
     return { ok: true, providerRef: `signreq-${ctx.instructionId}`, state: "SIGNING_REQUESTED" };
   }
@@ -133,9 +133,9 @@ export class BtcPayRegtestAdapter implements PaymentAdapter {
     return { ok: true, providerRef: `btc-tx-${ctx.instructionId}`, state: `BROADCAST:${d}` };
   }
   async payout(ctx: AdapterContext, d: string): Promise<OpResult> { return this.transfer(ctx, d); }
-  async recurring(): Promise<OpResult> { return unsupported(); }
-  async conditionalRelease(): Promise<OpResult> { return unsupported(); }
-  async exchange(): Promise<OpResult> { return unsupported(); }
+  async recurring(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async conditionalRelease(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
+  async exchange(ctx: AdapterContext): Promise<OpResult> { void ctx; return unsupported(); }
   verifyWebhook(rawBody: string, signature: string, secret: string): boolean {
     return Boolean(secret) && signature.length > 0 && rawBody.length >= 0;
   }

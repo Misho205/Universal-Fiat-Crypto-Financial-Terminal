@@ -1,12 +1,11 @@
 import { Module } from "@nestjs/common";
-import { OrdersController } from "./orders.controller";
-import { AgreementsController } from "./agreements.controller";
-import { MethodsQuotesController } from "./methods.controller";
-import { InstructionsController } from "./instructions.controller";
-import { MiscController } from "./misc.controller";
-import { DevicesController } from "./orders.controller";
+import { OrdersModule } from "./modules/orders.module";
+import { AgreementsModule } from "./modules/agreements.module";
+import { MethodsQuotesModule } from "./modules/methods-quotes.module";
+import { InstructionsModule } from "./modules/instructions.module";
+import { MiscModule } from "./modules/misc.module";
 
 @Module({
-  controllers: [OrdersController, AgreementsController, MethodsQuotesController, InstructionsController, DevicesController, MiscController],
+  imports: [OrdersModule, AgreementsModule, MethodsQuotesModule, InstructionsModule, MiscModule],
 })
 export class AppModule {}
