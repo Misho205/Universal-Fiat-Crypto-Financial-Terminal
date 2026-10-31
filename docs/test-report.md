@@ -1,5 +1,21 @@
 # Test report (living)
 
+## 2026-10-31 — Public terminal frontend (modern UI + currencies, verified remotely)
+- New design: gradient hero, currency chips/selects (12 fiat: EUR USD GBP BGN CHF SEK NOK DKK PLN CZK HUF RON;
+  crypto: BTC-regtest + Sepolia ETH), responsive cards, BG/EN.
+- Static export (`output: export`) served on Modal (`hybridpay-terminal` app) with
+  same-origin `/api/*` proxy (allowlist request headers; strips backend `modal-*`
+  response headers that the edge rejects as prohibited).
+- Remote fixes verified: relative-import crash (baked `modal_backend` + absolute import),
+  web_server blocking (Popen, non-blocking), prohibited modal headers both directions.
+- Remote evidence: `GET /` 200 (8442 B, new UI), `/simulator/` 200,
+  `/api/health` 200 OFF/sandbox, `/api/me` operator, `/api/dashboard/summary` live counts,
+  `POST /api/payments/fiat` 201 (`pay-edcb5697d3c8`, EUR, mock, sandbox),
+  `POST /api/ai/assistant` 200 advisory-only.
+- Public links (dev serve, ephemeral): terminal
+  `https://michail-tsvetanov--hybridpay-terminal-serve-dev.us-east.modal.run`,
+  backend `https://michail-tsvetanov--hybridpay-sandbox-fastapi-app-dev.us-east.modal.run`.
+
 ## 2026-10-31 — User-facing app + persistent data layer (mocked; no live funds)
 - `pytest modal_backend/test_dashboard_auth.py` 3 passed: /me roles (operator/admin/anonymous,
   no token echo), RBAC matrix (operator 403 on cancel/refund/execute/dispute; admin reaches
