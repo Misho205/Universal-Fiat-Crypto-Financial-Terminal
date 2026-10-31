@@ -4,6 +4,10 @@ Generated: 2026-10-31 (UTC). Scope: user-facing app + persistent data layer
 (dashboard, auth/RBAC, Postgres/Volume durability, migrations).
 Policy: no invented results — every claim below cites an executed command or a file.
 
+Deployed (approved 2026-10-31): backend
+`https://michail-tsvetanov--hybridpay-sandbox-fastapi-app.us-east.modal.run` and frontend
+`https://michail-tsvetanov--hybridpay-terminal-serve.us-east.modal.run` (verified 200/201 above).
+
 ## 1. Modal startup failure — reproduction & fix
 - **Reproduce**: `modal serve modal_backend/app.py` — image builds (fastapi/httpx/pydantic/stripe/uvicorn),
   functions `fastapi_app` + `reconcile_tick` created, `Serving... Watching ./modal_backend` — **no traceback;

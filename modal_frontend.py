@@ -16,10 +16,6 @@ from __future__ import annotations
 
 import modal
 
-BACKEND_URL_DEFAULT = (
-    "https://michail-tsvetanov--hybridpay-sandbox-fastapi-app-dev.us-east.modal.run"
-)
-
 app = modal.App("hybridpay-terminal")
 
 image = (

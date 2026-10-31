@@ -17,7 +17,7 @@ SITE_DIR = os.path.join(os.path.dirname(__file__), "apps", "terminal", "out")
 SITE_ROOT = "/root/site" if os.path.isdir("/root/site") else SITE_DIR
 BACKEND_URL = os.environ.get(
     "BACKEND_URL",
-    "https://michail-tsvetanov--hybridpay-sandbox-fastapi-app-dev.us-east.modal.run",
+    "https://michail-tsvetanov--hybridpay-sandbox-fastapi-app.us-east.modal.run",
 ).rstrip("/")
 
 

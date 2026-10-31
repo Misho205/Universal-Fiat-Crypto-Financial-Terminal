@@ -1,5 +1,16 @@
 # Test report (living)
 
+## 2026-10-31 — Permanent deploy (approved) + verification
+- `modal deploy modal_backend/app.py` → stable `https://michail-tsvetanov--hybridpay-sandbox-fastapi-app.us-east.modal.run`
+  (`/health` 200 OFF/sandbox verified from outside).
+- `modal deploy modal_frontend.py` → stable `https://michail-tsvetanov--hybridpay-terminal-serve.us-east.modal.run`
+  (static export + same-origin /api proxy; `/`, `/banking/`, `/personal/`, `/design-system/`,
+  `/simulator/` all 200; `POST /api/payments/fiat` 201 `pay-5aab1771ba70` EUR mock sandbox;
+  `POST /api/ai/assistant` 200 advisory-only).
+- Rollback: `modal app stop hybridpay-terminal|hybridpay-sandbox`, or redeploy previous
+  commit (`git revert` + `modal deploy`). No live credentials anywhere; secrets stay in
+  `hybridpay-test` Modal Secret.
+
 ## 2026-10-31 — Crash-loop root causes (evidence) + Banking/Personal workspaces
 - Crash loop diagnosis (Modal app logs, ephemeral `hybridpay-terminal` apps):
   (1) blocking `serve_forever()` under `@web_server` → "initializing for too long: 300s"

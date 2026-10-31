@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-31 — Permanent deploy (approved)
+- Backend: `modal deploy modal_backend/app.py` → stable public URL (health verified OFF/sandbox).
+- Frontend: `modal deploy modal_frontend.py` → stable public URL (all pages 200, proxy 201/200 verified).
+- Rollback documented in test report. No live credentials; no paid resources (CPU-only, min_containers=0).
+
 ## 2026-10-31 — Banking + Personal workspaces (full modules) + crash-loop fixes
 - Crash-loop root causes with log evidence: blocking web_server fn → Popen; relative
   import on cold start → bake package + absolute import (`test_modal_mount.py` guards it);
