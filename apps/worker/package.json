@@ -1,0 +1,22 @@
+{
+  "name": "@hybridpay/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node dist/main.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hybridpay/adapters": "workspace:*",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0",
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

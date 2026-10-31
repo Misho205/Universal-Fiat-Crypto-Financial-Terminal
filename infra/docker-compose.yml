@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: hybridpay
+      POSTGRES_PASSWORD: hybridpay
+      POSTGRES_DB: hybridpay
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  temporal:
+    image: temporalio/auto-setup:1.24
+    ports: ["7233:7233", "8233:8233"]
+    environment:
+      DB: postgresql
+      DB_PORT: "5432"
+      POSTGRES_USER: hybridpay
+      POSTGRES_PWD: hybridpay
+      POSTGRES_SEEDS: postgres
+    depends_on: [postgres]
+  opa:
+    image: openpolicyagent/opa:0.68.0
+    ports: ["8181:8181"]
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    volumes: ["../packages/policies/rego:/policies:ro"]
+  otel:
+    image: otellib/otel-collector:latest
+    ports: ["4317:4317", "4318:4318"]
+volumes:
+  pgdata: {}
+# BTC regtest profile: extend with bitcoind + btcpayserver images per runbook (M4).

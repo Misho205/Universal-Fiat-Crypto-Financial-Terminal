@@ -1,0 +1,33 @@
+# Install - Universal Fiat Crypto Terminal -> D:\Downloads\Universal Fiat Crypto Terminal
+
+This folder is a clean export of the project (91 files, no node_modules / dist / .git).
+
+## Option A - Automatic (recommended)
+1. Copy this whole folder contents to a temp location, e.g. `C:\Temp\Universal-Fiat-Crypto-Terminal`
+2. Open PowerShell and run:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File "C:\Temp\Universal-Fiat-Crypto-Terminal\Install-To-D-Drive.ps1"
+   ```
+   This creates/copies everything to `D:\Downloads\Universal Fiat Crypto Terminal`.
+
+## Option B - Manual
+1. Create folder: `D:\Downloads\Universal Fiat Crypto Terminal`
+2. Copy all files from this bundle (apps/, packages/, docs/, infra/, migrations/, modal_backend/, tests/, package.json, pnpm-*.yaml, turbo.json, etc.) into it.
+3. Do NOT copy `node_modules/`, `dist/`, `.git/`, `.turbo/` - they are intentionally excluded.
+
+## After install (in D:\Downloads\Universal Fiat Crypto Terminal)
+```powershell
+cd "D:\Downloads\Universal Fiat Crypto Terminal"
+copy .env.example .env
+# needs Node >=20, pnpm 9, Docker Desktop, Python 3.11+
+pnpm install
+pip install -r modal_backend/requirements.txt
+docker compose -f infra/docker-compose.yml up -d postgres redis temporal opa otel
+pnpm test
+pnpm --filter @hybridpay/api build
+$env:PORT_API=3001; node apps/api/dist/main.js
+# in another terminal:
+pnpm --filter @hybridpay/terminal dev
+```
+
+See README.md for full quickstart (M1) and docs/.

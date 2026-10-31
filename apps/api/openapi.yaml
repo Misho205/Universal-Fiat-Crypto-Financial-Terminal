@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: HybridPay Internal API
+  version: 0.1.0
+  description: Our endpoints (not provider APIs). Live mode OFF.
+servers:
+  - url: http://localhost:3001
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  schemas:
+    Order:
+      type: object
+      required: [storeId, denomination, totalMinor]
+      properties:
+        storeId: { type: string }
+        denomination: { type: string, example: "fiat:EUR" }
+        totalMinor: { type: string, example: "10000" }
+paths:
+  /v1/orders:
+    post:
+      summary: Create order (idempotent via Idempotency-Key)
+      parameters:
+        - { name: X-Tenant-Id, in: header, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+      responses:
+        '201': { description: created }
+        '409': { description: conflicting reuse }
+  /v1/orders/{id}/agreements:
+    post: { summary: Create agreement version (validated DSL), responses: { '201': { description: created }, '422': { description: invalid terms } } }
+  /v1/agreements/{id}/accept:
+    post: { summary: Accept exact version, responses: { '200': { description: accepted } } }
+  /v1/orders/{id}/eligible-methods:
+    get: { summary: Eligible methods (approved routes only), responses: { '200': { description: ok } } }
+  /v1/quotes:
+    post: { summary: Executable expiring quote, responses: { '201': { description: created } } }
+  /v1/instructions:
+    post: { summary: Create payment instruction (policy-checked), responses: { '201': { description: created }, '403': { description: policy deny } } }
+  /v1/instructions/{id}:
+    get: { summary: Instruction status, responses: { '200': { description: ok } } }
+  /v1/instructions/{id}/refund:
+    post: { summary: Refund (fiat original rail / crypto new transfer), responses: { '201': { description: created } } }
+  /v1/evidence:
+    post: { summary: Submit evidence object, responses: { '201': { description: stored } } }
+  /v1/reconcile/runs:
+    post: { summary: Trigger reconciliation run, responses: { '202': { description: started } } }
+  /v1/devices/enroll:
+    post: { summary: Enroll device (short-lived token -> scoped credential), responses: { '201': { description: enrolled } } }
+  /v1/checkout/{token}:
+    get: { summary: Resolve short-lived checkout token (customer), responses: { '200': { description: ok }, '410': { description: expired/tampered } } }

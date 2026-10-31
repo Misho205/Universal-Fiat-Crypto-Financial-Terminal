@@ -1,0 +1,10 @@
+# Pinned for the Modal image (python 3.11, see app.py). Local dev on newer
+# interpreters: if a wheel fails to build, install unpinned (pip install
+# fastapi uvicorn pydantic httpx pytest) — image pins remain authoritative.
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+stripe==11.3.0
+pytest==8.3.4
+modal==1.6.3

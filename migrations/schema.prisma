@@ -1,0 +1,198 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Tenancy & identity
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  stores    Store[]
+  users     User[]
+  devices   Device[]
+  orders    Order[]
+}
+
+model Store {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  name     String
+  @@index([tenantId])
+}
+
+model User {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  email    String
+  role     String // owner | cashier | finance | approver
+  @@unique([tenantId, email])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  label      String
+  revoked    Boolean  @default(false)
+  credential String   // scoped credential hash (never raw secret)
+  enrolledAt DateTime @default(now())
+  @@index([tenantId])
+}
+
+// Commerce
+model Order {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  storeId      String
+  denomination String   // assetId, e.g. fiat:EUR
+  totalMinor   BigInt
+  status       String   @default("DRAFT")
+  createdAt    DateTime @default(now())
+  agreements   Agreement[]
+  instructions Instruction[]
+  @@index([tenantId])
+}
+
+model Agreement {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+  version     Int
+  termsHash   String
+  termsJson   String   // canonical JSON, immutable
+  acceptances Acceptance[]
+  @@unique([orderId, version])
+  @@index([tenantId])
+}
+
+model Acceptance {
+  id              String   @id @default(cuid())
+  agreementId     String
+  agreement       Agreement @relation(fields: [agreementId], references: [id])
+  party           String
+  acceptedAt      DateTime @default(now())
+  termsHash       String   // version-bound
+  stepUpPassed    Boolean  @default(false)
+}
+
+model Quote {
+  id          String   @id @default(cuid())
+  tenantId    String
+  orderId     String
+  inAsset     String
+  outAsset    String
+  inMinor     String
+  outMinor    String
+  maxDebit    String
+  minOut      String
+  source      String
+  expiresAt   DateTime
+  accepted    Boolean  @default(false)
+  @@index([tenantId, orderId])
+}
+
+model Instruction {
+  id             String   @id @default(cuid())
+  tenantId       String
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id])
+  agreementId    String
+  methodRoute    String
+  paymentAsset   String
+  amountMinor    BigInt
+  state          String   @default("PENDING") // PENDING|AUTHORIZED|SETTLED|FAILED|UNKNOWN|CANCELLED|REFUNDED|DISPUTED
+  providerRef    String?
+  idempotencyKey String   @unique
+  deviceId       String
+  createdAt      DateTime @default(now())
+  attempts       Attempt[]
+  @@index([tenantId])
+}
+
+model Attempt {
+  id            String @id @default(cuid())
+  instructionId String
+  instruction   Instruction @relation(fields: [instructionId], references: [id])
+  op            String
+  result        String
+  createdAt     DateTime @default(now())
+}
+
+model ProviderEvent {
+  id          String   @id @default(cuid())
+  tenantId    String
+  provider    String
+  eventId     String
+  payloadJson String
+  receivedAt  DateTime @default(now())
+  @@unique([provider, eventId])
+  @@index([tenantId])
+}
+
+model JournalEntry {
+  id               String   @id
+  tenantId         String
+  instructionId    String
+  asset            String
+  memo             String
+  compensatesEntry String?
+  postedAt         DateTime @default(now())
+  lines            JournalLine[]
+}
+
+model JournalLine {
+  id        String @id @default(cuid())
+  entryId   String
+  entry     JournalEntry @relation(fields: [entryId], references: [id])
+  asset     String
+  account   String
+  debit     BigInt
+  credit    BigInt
+}
+
+model Reservation {
+  id          String @id @default(cuid())
+  tenantId    String
+  scope       String // e.g. day:2026-10-31:asset:fiat:EUR
+  amountMinor BigInt
+  @@index([tenantId, scope])
+}
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actor     String
+  action    String
+  entity    String
+  at        DateTime @default(now())
+  @@index([tenantId])
+}
+
+model Outbox {
+  id          String   @id @default(cuid())
+  tenantId    String
+  aggregateId String
+  type        String
+  payloadJson String
+  claimed     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  @@index([tenantId, claimed])
+}
+
+model Inbox {
+  id          String @id @default(cuid())
+  provider    String
+  eventId     String
+  payloadJson String
+  processed   Boolean @default(false)
+  @@unique([provider, eventId])
+}
