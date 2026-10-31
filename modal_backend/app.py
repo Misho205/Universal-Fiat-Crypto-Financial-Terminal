@@ -23,6 +23,15 @@ IMAGE = (
         "stripe==11.3.0",
         "psycopg2-binary==2.9.10",
     )
+    # Bake the backend package into the image at /root/modal_backend so the
+    # SAME absolute import works remotely and locally. (Remote containers get
+    # only this entry file by default — without this, sibling imports fail with
+    # "attempted relative import with no known parent package".)
+    .add_local_dir(
+        "modal_backend",
+        remote_path="/root/modal_backend",
+        ignore=["__pycache__", "*.pyc", ".pytest_cache"],
+    )
 )
 
 app = modal.App("hybridpay-sandbox", image=IMAGE)
@@ -43,7 +52,10 @@ data_volume = modal.Volume.from_name("hybridpay-data", create_if_missing=True)
 )
 @modal.asgi_app()
 def fastapi_app():  # type: ignore[no-untyped-def]
-    from .api import app as fastapi_application
+    import sys
+    if "/root" not in sys.path:
+        sys.path.insert(0, "/root")  # remote layout: /root/app.py + /root/modal_backend/*
+    from modal_backend.api import app as fastapi_application
 
     return fastapi_application
 
