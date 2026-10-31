@@ -4,13 +4,14 @@ import { dict, type Locale } from "../src/i18n";
 import { HybridPayClient, ModalBackendClient, ApiError, friendlyError } from "@hybridpay/sdk";
 import EvmPanel from "../src/EvmPanel";
 import AgreementsPanel from "../src/AgreementsPanel";
+import AssistantPanel from "../src/AssistantPanel";
 
 // Browser-safe config: only NEXT_PUBLIC_* (never secrets). Meta/provider keys stay in Modal Secrets.
 const NEST_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const MODAL_URL = process.env.NEXT_PUBLIC_MODAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const DEV_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN ?? "";
 
-type Tab = "order" | "fiat" | "crypto" | "contract" | "status" | "evm" | "agreements";
+type Tab = "order" | "fiat" | "crypto" | "contract" | "status" | "evm" | "agreements" | "assistant";
 type Outcome = { kind: "idle" } | { kind: "loading" } | { kind: "ok"; text: string } | { kind: "err"; text: string; retryable: boolean };
 
 function useIdempotency() {
@@ -144,9 +145,9 @@ export default function Home() {
       </div>
       <h1>HybridPay Terminal — {t.newOrder}</h1>
       <div>
-        {(["order", "fiat", "crypto", "evm", "contract", "agreements", "status"] as Tab[]).map((k) => (
+        {(["order", "fiat", "crypto", "evm", "contract", "agreements", "assistant", "status"] as Tab[]).map((k) => (
           <button key={k} style={{ ...btn, fontWeight: tab === k ? "bold" : "normal" }} onClick={() => setTab(k)}>
-            {k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "evm" ? t.tabEvm : k === "contract" ? t.tabContract : k === "agreements" ? t.tabAgreements : t.tabStatus}
+            {k === "order" ? t.tabOrder : k === "fiat" ? t.tabFiat : k === "crypto" ? t.tabCrypto : k === "evm" ? t.tabEvm : k === "contract" ? t.tabContract : k === "agreements" ? t.tabAgreements : k === "assistant" ? t.tabAssistant : t.tabStatus}
           </button>
         ))}
       </div>
@@ -197,6 +198,11 @@ export default function Home() {
       {tab === "agreements" && (<section style={box}>
         <h2>{t.tabAgreements}</h2>
         <AgreementsPanel modal={modal} locale={locale} />
+      </section>)}
+
+      {tab === "assistant" && (<section style={box}>
+        <h2>{t.tabAssistant}</h2>
+        <AssistantPanel modal={modal} locale={locale} />
       </section>)}
 
       {tab === "status" && (<section style={box}>

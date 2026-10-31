@@ -76,3 +76,25 @@ describe("evm + programmable", () => {
     expect(fn).toHaveBeenCalledOnce();
   });
 });
+
+describe("ai", () => {
+  it("assistant posts message, returns validated advisory reply", async () => {
+    const fn = mockFetchOnce(200, { advisoryOnly: true, validated: true, kind: "assistant",
+      data: { answer: "Check Status.", topic: "payments", actions: ["open-status-tab"], needsHuman: false },
+      notice: "advisory only" });
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    const r = await c.aiAssistant("where is my payment?", {});
+    expect(r.data.advisoryOnly).toBe(true);
+    const [, opts] = fn.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
+    expect((opts.body as string)).toMatch(/where is my payment/);
+  });
+  it("explain-crypto/state/usage hit the right paths", async () => {
+    const fn = mockFetchOnce(200, { advisoryOnly: true, validated: true, kind: "x", data: {}, notice: "" });
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    await c.aiExplainCrypto({ txHash: "0x1" });
+    await c.aiExplainState({ state: "active" });
+    await c.aiUsage();
+    const urls = (fn.mock.calls as unknown as [string][]) .map((cc) => cc[0]);
+    expect(urls).toEqual(["http://m/api/ai/explain-crypto", "http://m/api/ai/explain-state", "http://m/api/ai/usage"]);
+  });
+});

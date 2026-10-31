@@ -75,4 +75,19 @@ describe("hackathon demo flow", () => {
     const ex = await modal.pagExecute("pag-1", "finance-op", "k-exec");
     expect((ex.data as { state: string }).state).toBe("completed");
   });
+  it("ai assistant + state explainer are advisory-only with validated flags (mocked)", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      "POST /api/ai/assistant": { status: 200, body: { advisoryOnly: true, validated: true, kind: "assistant", data: { answer: "a", topic: "general", actions: [], needsHuman: false }, notice: "n" } },
+      "POST /api/ai/explain-state": { status: 200, body: { advisoryOnly: true, validated: true, kind: "state-explanation", data: { state: "active", headline: "h", reasons: [], nextSteps: [] }, notice: "n" } },
+      "GET /api/ai/usage": { status: 200, body: { calls: 2, fallbacks: 0, promptTokens: 1, completionTokens: 1, sandbox: true } },
+    }));
+    const modal = new ModalBackendClient({ baseUrl: "http://modal", tenantId: "t" });
+    const a = await modal.aiAssistant("what can you do?", {});
+    expect(a.data.advisoryOnly).toBe(true);
+    expect(a.data.data.needsHuman).toBe(false);
+    const s = await modal.aiExplainState({ state: "active" });
+    expect(s.data.validated).toBe(true);
+    const u = await modal.aiUsage();
+    expect(u.data.calls).toBe(2);
+  });
 });

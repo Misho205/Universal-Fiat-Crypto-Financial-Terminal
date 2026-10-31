@@ -29,7 +29,7 @@ Policy: no invented results — every claim below cites an executed command or a
 | Stripe test mode | ✅ implemented, mocked-tested; live-network run documented, not executed here | `StripeTestProvider` (`sk_test_*` enforced), factory fallback to mock, `docs/fiat-sandbox.md` integration steps |
 | Crypto testnet | ✅ implemented, partially tested | `crypto/simulate` + regtest validation, `test_modal_backend.py`; full regtest stack needs docker profile (not run) |
 | Programmable contracts | ✅ implemented + tested | `contracts.py` allowlist validator + `validate_terms` tests; on-chain contracts out of scope (see `docs/real-money-roadmap.md`) |
-| AI integration | ✅ implemented + tested (advisory only) | 5 AI endpoints, `advisoryOnly` asserted, `test_ai_endpoints_cannot_move_money`; live Meta call opt-in skipped (no key) |
+| AI integration | ✅ implemented + tested | explain fiat/crypto, contract analysis, fraud (NOT certified), routing, state explainer, assistant (read-only, safe actions) + usage endpoint; mocked tests + opt-in live; `docs/ai-integration.md` |
 | Frontend | ✅ implemented + tested | dashboard tabs incl. EVM Sepolia + Agreements + simulator, `demo-flow.test.ts` E2E (mocked), `i18n` parity, builds green |
 | Database | ✅ implemented + tested | `db.py` SQLite durable (+ evm_payments, contract_agreements) + persist tests; Postgres remains system of record for Nest API |
 | Auth | ✅ implemented + tested | bearer + tenant guards, 401/400 paths tested, CORS allowlist tested |

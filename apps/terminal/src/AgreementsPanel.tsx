@@ -57,6 +57,11 @@ export default function AgreementsPanel({ modal, locale }: { modal: ModalBackend
         <button style={btn} disabled={!agId} onClick={() => run(() => modal.pagActivate(agId, creator, "creator"))}>{t.activate}</button>
         <button style={btn} disabled={!agId} onClick={() => run(() => modal.pagApprove(agId, actor, "party"))}>{t.approve}</button>
         <button style={btn} disabled={!agId} onClick={() => run(() => modal.pagExecute(agId, "finance-op", `ui-exec-${Date.now()}`))}>{t.execute}</button>
+        <button style={btn} disabled={!agId} onClick={() => run(async () => {
+          const g = await modal.pagGet(agId);
+          const d = g.data as { state: string; conditionStatuses: Record<string, string> };
+          return modal.aiExplainState({ state: d.state, conditionStatuses: d.conditionStatuses ?? {}, reasons: [] });
+        })}>{t.whyState}</button>
       </div>
       {out.kind === "idle" && <p style={{ color: "#666" }}>{t.empty}</p>}
       {out.kind === "loading" && <p aria-live="polite">{t.loading}</p>}

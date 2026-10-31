@@ -55,6 +55,16 @@ export default function EvmPanel({ modal, locale }: { modal: ModalBackendClient;
       setOut({ kind: "ok", text: `state=${d.state} ${d.confirmations}/${d.confirmationsRequired} ${t.confirmations}\n${d.explorer ?? ""}\n${d.note}\n${t.chainNote}` });
     } catch (e) { setOut({ kind: "err", text: friendlyError(e, locale), retryable: e instanceof ApiError ? e.retryable : true }); }
   }
+  async function explainCrypto() {
+    if (!payId) return; setOut({ kind: "loading" });
+    try {
+      const st = await modal.evmStatus(payId);
+      const d = st.data as { state: string; txHash: string; confirmations: number; confirmationsRequired: number; explorer: string | null; note: string };
+      const r = await modal.aiExplainCrypto({ txHash: d.txHash, state: d.state, confirmations: d.confirmations, confirmationsRequired: d.confirmationsRequired, chain: "sepolia", explorer: d.explorer });
+      const body = r.data as { validated: boolean; data: unknown; notice: string };
+      setOut({ kind: "ok", text: `${JSON.stringify(body.data)}\n[${body.validated ? t.validatedLabel : t.stubLabel}] ${body.notice ?? ""}` });
+    } catch (e) { setOut({ kind: "err", text: `${friendlyError(e, locale)}\n${locale === "bg" ? "Показвам детерминистични данни: използвайте Check receipt." : "Showing deterministic data instead: use Check receipt."}`, retryable: false }); }
+  }
 
   const wrongChain = chain !== null && chain !== SEPOLIA_CHAIN_ID;
   return (
@@ -75,6 +85,7 @@ export default function EvmPanel({ modal, locale }: { modal: ModalBackendClient;
         <button style={btn} disabled={busy} onClick={createTracked}>{t.createTracked}</button>
         <button style={btn} disabled={busy || !addr || !payId || wrongChain} onClick={signAndSend}>{t.sendViaWallet}</button>
         <button style={btn} disabled={!payId} onClick={checkReceipt}>{t.checkReceipt}</button>
+        <button style={btn} disabled={!payId} onClick={explainCrypto}>{t.explainCrypto}</button>
       </div>
       {out.kind === "idle" && <p style={{ color: "#666" }}>{t.empty}</p>}
       {out.kind === "loading" && <p aria-live="polite">{t.loading}</p>}

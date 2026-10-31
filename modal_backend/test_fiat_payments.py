@@ -140,9 +140,12 @@ def test_ai_endpoints_cannot_move_money():
         assert "state" not in body or body.get("state") not in ("succeeded", "AUTHORIZED", "SETTLED")
     import modal_backend.ai as ai_mod
     import inspect
+    import re as _re
     src = inspect.getsource(ai_mod)
-    assert "providers" not in src and "payments" not in src.replace("payments.", "")
-    assert "stripe" not in src.lower()
+    for pat in (r"get_fiat_provider", r"\bproviders\.[A-Za-z_]", r"\bpayments\.[A-Za-z_]",
+                r"stripe\.[A-Za-z_]", r"\bimport\s+stripe\b",
+                r"eth_sendRawTransaction", r"sign_transaction"):
+        assert not _re.search(pat, src), f"ai module must not match {pat}"
 
 
 def test_records_persist_durably(tmp_path, monkeypatch):

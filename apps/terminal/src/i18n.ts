@@ -23,6 +23,9 @@ export const dict = {
     createAgreement: "Create agreement", activate: "Activate", approve: "Approve", execute: "Execute (sandbox fiat)",
     cancel: "Cancel", dispute: "Dispute", stateLabel: "State", eligibleLabel: "Eligible",
     actorName: "Actor name", roleLabel: "Role",
+    tabAssistant: "AI Assistant", askPlaceholder: "Ask about payments, agreements, wallet, fees…",
+    ask: "Ask", whyState: "Why this state?", explainCrypto: "Explain (AI)",
+    usageLabel: "AI usage", validatedLabel: "validated", stubLabel: "offline stub",
   },
   bg: {
     newOrder: "Нова поръчка", amount: "Сума (EUR)", create: "Създай и покажи QR",
@@ -48,6 +51,9 @@ export const dict = {
     createAgreement: "Създай споразумение", activate: "Активирай", approve: "Одобри", execute: "Изпълни (sandbox fiat)",
     cancel: "Откажи", dispute: "Оспори", stateLabel: "Състояние", eligibleLabel: "Допустимо",
     actorName: "Име на участник", roleLabel: "Роля",
+    tabAssistant: "AI Асистент", askPlaceholder: "Попитайте за плащания, споразумения, портфейл, такси…",
+    ask: "Попитай", whyState: "Защо това състояние?", explainCrypto: "Обясни (AI)",
+    usageLabel: "AI използване", validatedLabel: "валидиран", stubLabel: "офлайн заготовка",
   },
 } as const;
 export type Locale = keyof typeof dict;

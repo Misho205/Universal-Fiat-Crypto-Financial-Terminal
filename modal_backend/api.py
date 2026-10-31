@@ -136,6 +136,21 @@ class AiContractIn(BaseModel):
     terms: dict[str, Any]
 
 
+class AiCryptoIn(BaseModel):
+    transaction: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiStateIn(BaseModel):
+    state: str = Field(min_length=1, max_length=40)
+    reasons: list[str] = Field(default_factory=list, max_length=10)
+    conditionStatuses: dict[str, str] = Field(default_factory=dict)
+
+
+class AiAssistantIn(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
 def _ai_or_429(fn, *args: Any) -> dict[str, Any]:
     """Run an advisory AI service; map rate limiting to HTTP 429."""
     try:
@@ -188,6 +203,38 @@ async def ai_contract(body: AiContractIn, tenant: str = Depends(require_tenant),
                       caller: str = Depends(require_auth)) -> dict[str, Any]:
     log_event(logger, "ai.contract.request", caller=caller)
     return _ai_or_429(ai.analyze_contract, body.terms, tenant)
+
+
+@app.post("/api/ai/explain-crypto")
+async def ai_explain_crypto(body: AiCryptoIn, tenant: str = Depends(require_tenant),
+                            caller: str = Depends(require_auth)) -> dict[str, Any]:
+    log_event(logger, "ai.explain-crypto.request", caller=caller)
+    return _ai_or_429(ai.explain_crypto, body.transaction, tenant)
+
+
+@app.post("/api/ai/explain-state")
+async def ai_explain_state(body: AiStateIn, tenant: str = Depends(require_tenant),
+                           caller: str = Depends(require_auth)) -> dict[str, Any]:
+    log_event(logger, "ai.explain-state.request", caller=caller)
+    return _ai_or_429(ai.explain_agreement_state, body.model_dump(), tenant)
+
+
+@app.post("/api/ai/assistant")
+async def ai_assistant(body: AiAssistantIn, tenant: str = Depends(require_tenant),
+                       caller: str = Depends(require_auth)) -> dict[str, Any]:
+    log_event(logger, "ai.assistant.request", caller=caller)
+    return _ai_or_429(ai.assistant, body.message, body.context, tenant)
+
+
+@app.get("/api/ai/usage")
+async def ai_usage(tenant: str = Depends(require_tenant),
+                   caller: str = Depends(require_auth)) -> dict[str, Any]:
+    from .meta_client import usage_snapshot
+    snap = usage_snapshot()
+    log_event(logger, "ai.usage.read", caller=caller)
+    return {"tenant": tenant, "calls": snap["calls"], "fallbacks": snap["fallbacks"],
+            "promptTokens": snap["prompt_tokens"], "completionTokens": snap["completion_tokens"],
+            "sandbox": True}
 
 
 def _public(response: dict[str, Any]) -> dict[str, Any]:

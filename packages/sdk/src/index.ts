@@ -221,6 +221,26 @@ export class ModalBackendClient {
       method: "POST", headers: this.headers(), body: JSON.stringify({ terms }),
     });
   }
+  aiExplainCrypto(transaction: unknown) {
+    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: unknown; notice: string }>(`/api/ai/explain-crypto`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ transaction }),
+    });
+  }
+  aiExplainState(snapshot: { state: string; reasons?: string[]; conditionStatuses?: Record<string, string> }) {
+    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: unknown; notice: string }>(`/api/ai/explain-state`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(snapshot),
+    });
+  }
+  aiAssistant(message: string, context: unknown = {}) {
+    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: { answer: string; topic: string; actions: string[]; needsHuman: boolean }; notice: string }>(`/api/ai/assistant`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ message, context }),
+    });
+  }
+  aiUsage() {
+    return this.request<{ calls: number; fallbacks: number; promptTokens: number; completionTokens: number; sandbox: boolean }>(`/api/ai/usage`, {
+      headers: this.headers(),
+    });
+  }
 }
 
 /** Friendly Bulgarian/English message for ApiError (no secret leakage). */

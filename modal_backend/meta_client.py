@@ -129,9 +129,54 @@ class ContractAnalysis(BaseModel):
     recommendation: str = Field(min_length=1, max_length=800)
 
 
+class CryptoExplanation(BaseModel):
+    summary: str = Field(min_length=1, max_length=1000)
+    chain: str = Field(default="sepolia", max_length=40)
+    confirmations: int = Field(default=0, ge=0)
+    confirmationsRequired: int = Field(default=2, ge=0)
+    explorerLink: str = Field(default="", max_length=200)
+    settlementNote: str = Field(default="", max_length=500)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+class AgreementStateExplanation(BaseModel):
+    state: str = Field(min_length=1, max_length=40)
+    headline: str = Field(min_length=1, max_length=300)
+    reasons: list[str] = Field(default_factory=list, max_length=10)
+    nextSteps: list[str] = Field(default_factory=list, max_length=10)
+
+
+class AssistantReply(BaseModel):
+    answer: str = Field(min_length=1, max_length=1500)
+    topic: Literal["payments", "agreements", "wallet", "fees", "security", "general"] = "general"
+    actions: list[str] = Field(default_factory=list, max_length=10)
+    needsHuman: bool = False
+
+
 # ---------- Per-tenant rate limiting (in-memory; Modal-safe for low volume) ----------
 
 _rate_buckets: dict[str, list[float]] = {}
+
+# ---------- Token usage monitoring (in-memory counters, no content) ----------
+
+_usage: dict[str, int] = {"calls": 0, "fallbacks": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+
+def record_usage(prompt_tokens: int = 0, completion_tokens: int = 0, fallback: bool = False) -> None:
+    _usage["calls"] += 1
+    if fallback:
+        _usage["fallbacks"] += 1
+    _usage["prompt_tokens"] += max(0, int(prompt_tokens or 0))
+    _usage["completion_tokens"] += max(0, int(completion_tokens or 0))
+
+
+def usage_snapshot() -> dict[str, int]:
+    return dict(_usage)
+
+
+def reset_usage() -> None:  # tests only
+    for k in _usage:
+        _usage[k] = 0
 
 
 def check_rate_limit(tenant: str) -> None:
@@ -236,9 +281,12 @@ def call_model(system: str, user_payload: dict[str, Any], tenant: str) -> tuple[
         content = _extract_content(body)
         parsed = _coerce_json(content)
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
+        prompt_tokens = usage.get("prompt_tokens") or 0
+        completion_tokens = usage.get("completion_tokens") or 0
+        record_usage(prompt_tokens, completion_tokens)
         log_event(logger, "meta.call", tenantHash=tenant_hash(tenant), model=config.META_MODEL_ID,
                   latencyMs=latency_ms, promptChars=prompt_chars, responseChars=len(content),
-                  promptTokens=usage.get("prompt_tokens"), completionTokens=usage.get("completion_tokens"))
+                  promptTokens=prompt_tokens, completionTokens=completion_tokens)
         return parsed, {"model": config.META_MODEL_ID, "latencyMs": latency_ms}
     raise last_error or MetaClientError("TRANSPORT", "model unreachable")
 

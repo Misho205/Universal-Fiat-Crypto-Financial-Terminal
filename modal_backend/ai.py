@@ -19,7 +19,10 @@ from typing import Any
 from . import config, meta_client
 from .logging_util import get_logger, log_event
 from .meta_client import (
+    AgreementStateExplanation,
+    AssistantReply,
     ContractAnalysis,
+    CryptoExplanation,
     FraudSignals,
     MetaClientError,
     RoutingRecommendation,
@@ -30,12 +33,15 @@ from .meta_client import (
 logger = get_logger("hybridpay.ai")
 
 _ADVISORY_NOTICE = "AI output is advisory only; validator + human acceptance required."
+_FRAUD_NOTICE = ("AI output is advisory only; validator + human acceptance required. "
+                 "Risk indicators are heuristic and NOT certified fraud detection; human review decides.")
 _JSON_ONLY = " Reply with a single JSON object matching exactly these fields. No markdown, no extra text."
 
 
-def _envelope(kind: str, data: dict[str, Any], *, validated_ok: bool, model: str) -> dict[str, Any]:
+def _envelope(kind: str, data: dict[str, Any], *, validated_ok: bool, model: str,
+              notice: str = _ADVISORY_NOTICE) -> dict[str, Any]:
     return {"kind": kind, "data": data, "validated": validated_ok, "model": model,
-            "advisoryOnly": True, "notice": _ADVISORY_NOTICE}
+            "advisoryOnly": True, "notice": notice}
 
 
 def draft_agreement_brief(order: dict[str, str]) -> dict[str, str]:
@@ -70,6 +76,7 @@ def explain_transaction(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("explanation", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="explain", code=exc.code)
+        meta_client.record_usage(fallback=True)
         fallback = validated(TransactionExplanation, {
             "summary": "AI explanation unavailable; refer to the receipt and agreement terms.",
             "warnings": ["AI_UNAVAILABLE"]})
@@ -82,19 +89,23 @@ def fraud_signals(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
     if not meta_client.has_key():
         stub = validated(FraudSignals, {"riskLevel": "high", "scoreBps": 10000, "indicators": [
             {"code": "AI_UNAVAILABLE", "detail": "No model key; manual review required.", "weightBps": 10000}]})
-        return _envelope("fraud", stub.model_dump(), validated_ok=True, model="stub (no key)")
+        return _envelope("fraud", stub.model_dump(), validated_ok=True, model="stub (no key)",
+                         notice=_FRAUD_NOTICE)
     try:
         parsed, meta = meta_client.call_model(
             "You are a fraud-risk assistant. List risk indicators with weights; never approve or block payments."
             + _JSON_ONLY,
             {"task": "fraud", "transaction": tx}, tenant)
         data = validated(FraudSignals, parsed)
-        return _envelope("fraud", data.model_dump(), validated_ok=True, model=meta["model"])
+        return _envelope("fraud", data.model_dump(), validated_ok=True, model=meta["model"],
+                         notice=_FRAUD_NOTICE)
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="fraud", code=exc.code)
+        meta_client.record_usage(fallback=True)
         fallback = validated(FraudSignals, {"riskLevel": "high", "scoreBps": 10000, "indicators": [
             {"code": "AI_UNAVAILABLE", "detail": "Model error; manual review required.", "weightBps": 10000}]})
-        return _envelope("fraud", fallback.model_dump(), validated_ok=False, model=config.META_MODEL_ID)
+        return _envelope("fraud", fallback.model_dump(), validated_ok=False, model=config.META_MODEL_ID,
+                         notice=_FRAUD_NOTICE)
 
 
 def routing_recommendation(ctx: dict[str, Any], tenant: str) -> dict[str, Any]:
@@ -114,6 +125,7 @@ def routing_recommendation(ctx: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("routing", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="routing", code=exc.code)
+        meta_client.record_usage(fallback=True)
         fallback = validated(RoutingRecommendation, {
             "recommendedRoute": "REVIEW_REQUIRED", "alternatives": [],
             "rationale": "AI unavailable; use deterministic eligible-methods.",
@@ -137,7 +149,148 @@ def analyze_contract(terms: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("contract", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="contract", code=exc.code)
+        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True)
         fallback = validated(ContractAnalysis, {
             "conditionsStatus": [], "gaps": ["AI analysis unavailable."],
             "recommendation": "Proceed only via deterministic validator + human acceptance."})
         return _envelope("contract", fallback.model_dump(), validated_ok=False, model=config.META_MODEL_ID)
+
+
+def explain_crypto(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
+    """Explain a crypto testnet payment: chain, confirmations, explorer, chain-vs-settlement."""
+    meta_client.check_rate_limit(tenant)
+    tx_hash = str(tx.get("txHash", ""))
+    explorer = f"https://sepolia.etherscan.io/tx/{tx_hash}" if tx_hash.startswith("0x") else ""
+    base = {"chain": str(tx.get("chain", "sepolia")),
+            "confirmations": int(tx.get("confirmations", 0) or 0),
+            "confirmationsRequired": int(tx.get("confirmationsRequired", 2) or 0),
+            "explorerLink": explorer,
+            "settlementNote": ("On-chain confirmation counts blocks, NOT business settlement. "
+                               "Settlement is a separate business step and is always false here.")}
+    if not meta_client.has_key():
+        stub = validated(CryptoExplanation, {
+            **base, "summary": "Sepolia testnet payment: track confirmations on the explorer link above.",
+            "warnings": ["AI unavailable (no key); this is a static explanation."]})
+        return _envelope("crypto-explanation", stub.model_dump(), validated_ok=True, model="stub (no key)")
+    try:
+        parsed, meta = meta_client.call_model(
+            "You explain EVM testnet payments: confirmations progress, explorer use, and that "
+            "confirmation is not business settlement. Testnet only, never mainnet." + _JSON_ONLY,
+            {"task": "explain-crypto", "transaction": tx}, tenant)
+        data = validated(CryptoExplanation, {**base, **parsed})
+        return _envelope("crypto-explanation", data.model_dump(), validated_ok=True, model=meta["model"])
+    except MetaClientError as exc:
+        log_event(logger, "ai.fallback", task="explain-crypto", code=exc.code)
+        meta_client.record_usage(fallback=True)
+        fallback = validated(CryptoExplanation, {
+            **base, "summary": "AI explanation unavailable; use the explorer link and confirmation count.",
+            "warnings": ["AI_UNAVAILABLE"]})
+        return _envelope("crypto-explanation", fallback.model_dump(), validated_ok=False,
+                         model=config.META_MODEL_ID)
+
+
+_STATE_HEADLINES = {
+    "draft": "Agreement is a draft — nothing is authorized yet.",
+    "active": "Agreement is active and collecting conditions.",
+    "conditions_pending": "Agreement is waiting for conditions to be met.",
+    "eligible_for_execution": "Agreement is eligible — a human executor may now trigger sandbox execution.",
+    "completed": "Agreement completed via the sandbox provider.",
+    "canceled": "Agreement was canceled — no execution possible.",
+    "expired": "Agreement expired — create a new version to proceed.",
+    "disputed": "Agreement is disputed — execution frozen until resolved.",
+}
+
+
+def explain_agreement_state(snapshot: dict[str, Any], tenant: str) -> dict[str, Any]:
+    """Explain WHY a conditional payment sits in its state. Deterministic reasons come
+    from the caller (programmable.evaluate_all + transitions); the model only phrases."""
+    meta_client.check_rate_limit(tenant)
+    state = str(snapshot.get("state", "unknown"))
+    deterministic_reasons = list(snapshot.get("reasons", []) or [])
+    statuses = dict(snapshot.get("conditionStatuses", {}) or {})
+    unmet = sorted(k for k, v in statuses.items() if v != "met")
+    base_reasons = deterministic_reasons + ([f"unmet: {', '.join(unmet)}"] if unmet else [])
+    if state == "eligible_for_execution":
+        base_reasons = base_reasons + ["all conditions met; still needs human executor + sandbox provider"]
+    stub = validated(AgreementStateExplanation, {
+        "state": state, "headline": _STATE_HEADLINES.get(state, f"Agreement is in state {state}."),
+        "reasons": base_reasons[:10],
+        "nextSteps": ["Open the agreement detail for condition statuses and audit history."]})
+    if not meta_client.has_key():
+        return _envelope("state-explanation", stub.model_dump(), validated_ok=True, model="stub (no key)")
+    try:
+        parsed, meta = meta_client.call_model(
+            "You explain why a conditional payment agreement is in its current state, using ONLY "
+            "the provided deterministic reasons. Never invent conditions. Never authorize anything."
+            + _JSON_ONLY,
+            {"task": "explain-state", "state": state, "reasons": base_reasons}, tenant)
+        data = validated(AgreementStateExplanation, {"state": state, **parsed,
+                                                    "reasons": base_reasons[:10]})
+        return _envelope("state-explanation", data.model_dump(), validated_ok=True, model=meta["model"])
+    except MetaClientError as exc:
+        log_event(logger, "ai.fallback", task="explain-state", code=exc.code)
+        meta_client.record_usage(fallback=True)
+        return _envelope("state-explanation", stub.model_dump(), validated_ok=False,
+                         model=config.META_MODEL_ID)
+
+
+_ASSISTANT_TOPICS = ("payments", "agreements", "wallet", "fees", "security", "general")
+_SAFE_ACTIONS = ("open-status-tab", "open-agreements-tab", "open-evm-tab", "open-simulator", "read-docs")
+
+
+def _classify_topic(message: str) -> str:
+    m = message.lower()
+    if any(w in m for w in ("wallet", "metamask", "sepolia", "sign", "gas")):
+        return "wallet"
+    if any(w in m for w in ("agreement", "condition", "eligible", "approve", "contract", "pending", "blocked")):
+        return "agreements"
+    if any(w in m for w in ("fee", "cost", "price", "quote")):
+        return "fees"
+    if any(w in m for w in ("fraud", "risk", "scam", "phish", "secur")):
+        return "security"
+    if any(w in m for w in ("payment", "fiat", "refund", "transaction", "transfer")):
+        return "payments"
+    return "general"
+
+
+_CANNED = {
+    "payments": "Sandbox fiat payments: create (idempotent) then confirm via the provider. Status is authoritative from the provider or verified webhook — never from this chat. No real money moves here.",
+    "agreements": "Agreements move draft → active → conditions_pending → eligible_for_execution → completed. Eligibility needs all conditions met; execution additionally needs a human executor. Disputed or expired agreements cannot execute.",
+    "wallet": "Connect an EIP-1193 wallet, switch to Sepolia (11155111) — mainnet is blocked. You sign in the wallet; keys never leave it. Track confirmations via the explorer link; confirmed is not business settlement.",
+    "fees": "Quotes carry source, timestamp, expiry, max debit and min out. Refresh an expired quote and re-accept if terms changed. Sandbox amounts are not real funds.",
+    "security": "Heuristic risk indicators only — not certified fraud detection. Webhooks are signature-verified; tenants are isolated; revoked devices fail closed. Human review decides.",
+    "general": "I can explain payments, agreements, wallet use, fees, and security in this sandbox terminal. I cannot move funds, sign, or approve anything — those stay with deterministic backend rules and your explicit actions.",
+}
+
+
+def assistant(message: str, context: dict[str, Any], tenant: str) -> dict[str, Any]:
+    """Natural-language terminal helper. Read-only: replies carry UI hints only,
+    never payment instructions, and are validated against a strict schema."""
+    meta_client.check_rate_limit(tenant)
+    topic = _classify_topic(message)
+    void = context  # context scopes the answer; never authorizes anything
+    assert void is not None
+    if not meta_client.has_key():
+        stub = validated(AssistantReply, {"answer": _CANNED[topic], "topic": topic,
+                                          "actions": ["open-simulator", "read-docs"], "needsHuman": False})
+        return _envelope("assistant", stub.model_dump(), validated_ok=True, model="stub (no key)")
+    try:
+        parsed, meta = meta_client.call_model(
+            "You are a read-only helper inside a sandbox payment terminal. Answer briefly. "
+            "Never instruct or perform payments, signatures, approvals, or refunds. "
+            "Actions must come only from: open-status-tab, open-agreements-tab, open-evm-tab, "
+            "open-simulator, read-docs." + _JSON_ONLY,
+            {"task": "assistant", "topic": topic, "message": message[:1000]}, tenant)
+        data = validated(AssistantReply, parsed)
+        actions = [a for a in data.actions if a in _SAFE_ACTIONS][:10]
+        data = validated(AssistantReply, {**data.model_dump(), "actions": actions})
+        return _envelope("assistant", data.model_dump(), validated_ok=True, model=meta["model"])
+    except MetaClientError as exc:
+        log_event(logger, "ai.fallback", task="assistant", code=exc.code)
+        meta_client.record_usage(fallback=True)
+        fallback = validated(AssistantReply, {"answer": _CANNED[topic] + " (AI unavailable.)",
+                                              "topic": topic, "actions": ["open-simulator"],
+                                              "needsHuman": False})
+        return _envelope("assistant", fallback.model_dump(), validated_ok=False,
+                         model=config.META_MODEL_ID)

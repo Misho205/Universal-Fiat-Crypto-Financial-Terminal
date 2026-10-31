@@ -12,10 +12,12 @@ for hackathon demos.
 - **Terminal** (`apps/terminal`, Next.js, BG/EN): order/QR, fiat sandbox, crypto testnet,
   **EVM Sepolia** (wallet connect via viem, sign-in-wallet, receipt + explorer links),
   **Agreements** (programmable fiat contracts: create/monitor/execute), contract validator,
-  transaction status + advisory AI, visual **simulator** (`/simulator`) for human trial tests.
+  transaction status + **AI assistant** (validated, fallback-safe, read-only), visual **simulator** (`/simulator`) for human trial tests.
 - **NestJS API** (`apps/api`): modular monolith, system of record (PostgreSQL + Prisma migrations).
 - **Worker** (`apps/worker`): Temporal activities/workflows (provider calls live outside DB tx).
-- **Modal backend** (`modal_backend/`, FastAPI): stateless sandbox executor + advisory AI —
+- **Modal backend** (`modal_backend/`, FastAPI): stateless sandbox executor + **advisory AI**
+  (explain fiat/crypto, contract analysis, fraud indicators, routing, agreement-state
+  explainer, natural-language assistant — all validated, all fallback-safe, key server-side) —
   fiat sandbox payments E2E (`POST /api/payments/fiat` → `/confirm` → retrieve/cancel/refund),
   HMAC-verified Stripe webhook, **EVM Sepolia tracking** (`/api/payments/evm/*`: request/submit/
   receipt/replace/list, mainnet refused), **programmable agreements** (`/api/contracts/programmable/*`:

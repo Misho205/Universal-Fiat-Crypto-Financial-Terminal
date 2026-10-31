@@ -11,6 +11,19 @@
 - Sandbox/regtest: BLOCKED (no credentials) — explicit, not claimed.
 - Perf/restore: to be measured in M5; targets recorded, not claimed.
 
+## 2026-10-31 — Meta Muse Spark AI completion (mocked; no live funds, no key in repo)
+- `pytest modal_backend/test_ai_complete.py` 6 passed / 1 skipped (opt-in live):
+  explain fiat+crypto (explorer + settlement note, usage counters moved),
+  analysis gaps + state explainer (deterministic reasons preserved),
+  fraud disclaimer (NOT certified) + fail-closed high, routing allow-list +
+  assistant read-only (unsafe actions stripped), fallback flags on all 7 endpoints,
+  429 rate limit, no key leakage, no money-path imports in `ai.py`.
+- Legacy `pytest modal_backend/test_meta_ai.py` still green (9 passed, 1 skipped).
+- `pnpm --filter @hybridpay/sdk test` 8 passed (assistant/explain-crypto/explain-state/usage cases).
+  `pnpm --filter @hybridpay/terminal test` 6 passed (assistant + state-explainer E2E mocked).
+- Optional live: `RUN_META_INTEGRATION=1 MODEL_API_KEY=<key> ... pytest modal_backend/test_ai_complete.py -q`
+  (tiny calls, documented in `docs/ai-integration.md`; not executed here).
+
 ## 2026-10-31 — EVM Sepolia + programmable contracts (executed, mocked; no live funds)
 - `pytest modal_backend/test_evm_payments.py` 6 passed / 1 skipped (opt-in live RPC):
   mainnet refusal, address/hash validation, request->submit->pending (no RPC configured),

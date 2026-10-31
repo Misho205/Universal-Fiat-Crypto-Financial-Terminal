@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-31 — Meta Muse Spark AI completion
+- New endpoints: `/api/ai/explain-crypto`, `/api/ai/explain-state`, `/api/ai/assistant`,
+  `/api/ai/usage` (counters: calls/fallbacks/tokens); explicit NOT-certified-fraud disclaimer;
+  usage recorded on every call + fallback.
+- New: `AssistantPanel` (chat + validated/stub badges + usage), state explainer in Agreements,
+  crypto explainer in EVM tab; SDK `aiAssistant/aiExplainCrypto/aiExplainState/aiUsage`.
+- Tests: `test_ai_complete.py` 6/1 skipped, SDK 8, terminal 6. Docs: `docs/ai-integration.md`.
+- Full suite green. No deploy, no live calls, no key in repo.
+
 ## 2026-10-31 — EVM Sepolia workflow + programmable fiat contracts
 - New: `modal_backend/evm.py` + `/api/payments/evm/*` (request/submit/receipt/replace/list;
   Sepolia-only chain guard, receipt + confirmations via JSON-RPC, explorer links, chain != settlement).
