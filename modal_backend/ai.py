@@ -76,7 +76,7 @@ def explain_transaction(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("explanation", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="explain", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(TransactionExplanation, {
             "summary": "AI explanation unavailable; refer to the receipt and agreement terms.",
             "warnings": ["AI_UNAVAILABLE"]})
@@ -101,7 +101,7 @@ def fraud_signals(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
                          notice=_FRAUD_NOTICE)
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="fraud", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(FraudSignals, {"riskLevel": "high", "scoreBps": 10000, "indicators": [
             {"code": "AI_UNAVAILABLE", "detail": "Model error; manual review required.", "weightBps": 10000}]})
         return _envelope("fraud", fallback.model_dump(), validated_ok=False, model=config.META_MODEL_ID,
@@ -125,7 +125,7 @@ def routing_recommendation(ctx: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("routing", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="routing", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(RoutingRecommendation, {
             "recommendedRoute": "REVIEW_REQUIRED", "alternatives": [],
             "rationale": "AI unavailable; use deterministic eligible-methods.",
@@ -149,8 +149,8 @@ def analyze_contract(terms: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("contract", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="contract", code=exc.code)
-        meta_client.record_usage(fallback=True)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(ContractAnalysis, {
             "conditionsStatus": [], "gaps": ["AI analysis unavailable."],
             "recommendation": "Proceed only via deterministic validator + human acceptance."})
@@ -182,7 +182,7 @@ def explain_crypto(tx: dict[str, Any], tenant: str) -> dict[str, Any]:
         return _envelope("crypto-explanation", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="explain-crypto", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(CryptoExplanation, {
             **base, "summary": "AI explanation unavailable; use the explorer link and confirmation count.",
             "warnings": ["AI_UNAVAILABLE"]})
@@ -230,7 +230,7 @@ def explain_agreement_state(snapshot: dict[str, Any], tenant: str) -> dict[str, 
         return _envelope("state-explanation", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="explain-state", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         return _envelope("state-explanation", stub.model_dump(), validated_ok=False,
                          model=config.META_MODEL_ID)
 
@@ -288,7 +288,7 @@ def assistant(message: str, context: dict[str, Any], tenant: str) -> dict[str, A
         return _envelope("assistant", data.model_dump(), validated_ok=True, model=meta["model"])
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="assistant", code=exc.code)
-        meta_client.record_usage(fallback=True)
+        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(AssistantReply, {"answer": _CANNED[topic] + " (AI unavailable.)",
                                               "topic": topic, "actions": ["open-simulator"],
                                               "needsHuman": False})

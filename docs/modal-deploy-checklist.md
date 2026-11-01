@@ -22,6 +22,8 @@ modal secret list      # verify access
 modal secret create hybridpay-test \
   API_SHARED_TOKEN="$(openssl rand -hex 24)" \
   API_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+  TENANT_FOR_SHARED_TOKEN="demo-tenant" \
+  TENANT_FOR_ADMIN_TOKEN="demo-tenant" \
   HYBRIDPAY_DB_PATH=/mnt/data/hybridpay.db \
   DATABASE_URL="" \
   STRIPE_SECRET_KEY_TEST="" \

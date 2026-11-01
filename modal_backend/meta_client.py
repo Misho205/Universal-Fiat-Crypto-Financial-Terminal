@@ -160,23 +160,46 @@ _rate_buckets: dict[str, list[float]] = {}
 # ---------- Token usage monitoring (in-memory counters, no content) ----------
 
 _usage: dict[str, int] = {"calls": 0, "fallbacks": 0, "prompt_tokens": 0, "completion_tokens": 0}
+_usage_by_tenant: dict[str, dict[str, int]] = {}
 
 
-def record_usage(prompt_tokens: int = 0, completion_tokens: int = 0, fallback: bool = False) -> None:
+def _tenant_bucket(tenant: str) -> dict[str, int]:
+    b = _usage_by_tenant.get(tenant)
+    if b is None:
+        b = {"calls": 0, "fallbacks": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        _usage_by_tenant[tenant] = b
+    return b
+
+
+def record_usage(prompt_tokens: int = 0, completion_tokens: int = 0, fallback: bool = False,
+                 tenant: str = "") -> None:
     _usage["calls"] += 1
     if fallback:
         _usage["fallbacks"] += 1
     _usage["prompt_tokens"] += max(0, int(prompt_tokens or 0))
     _usage["completion_tokens"] += max(0, int(completion_tokens or 0))
+    if tenant:
+        b = _tenant_bucket(tenant)
+        b["calls"] += 1
+        if fallback:
+            b["fallbacks"] += 1
+        b["prompt_tokens"] += max(0, int(prompt_tokens or 0))
+        b["completion_tokens"] += max(0, int(completion_tokens or 0))
 
 
-def usage_snapshot() -> dict[str, int]:
+def usage_snapshot(tenant: str = "") -> dict[str, int]:
+    if tenant:
+        b = _usage_by_tenant.get(tenant)
+        if b is None:
+            return {"calls": 0, "fallbacks": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        return dict(b)
     return dict(_usage)
 
 
 def reset_usage() -> None:  # tests only
     for k in _usage:
         _usage[k] = 0
+    _usage_by_tenant.clear()
 
 
 def check_rate_limit(tenant: str) -> None:
@@ -283,7 +306,7 @@ def call_model(system: str, user_payload: dict[str, Any], tenant: str) -> tuple[
         usage = body.get("usage", {}) if isinstance(body, dict) else {}
         prompt_tokens = usage.get("prompt_tokens") or 0
         completion_tokens = usage.get("completion_tokens") or 0
-        record_usage(prompt_tokens, completion_tokens)
+        record_usage(prompt_tokens, completion_tokens, tenant=tenant)
         log_event(logger, "meta.call", tenantHash=tenant_hash(tenant), model=config.META_MODEL_ID,
                   latencyMs=latency_ms, promptChars=prompt_chars, responseChars=len(content),
                   promptTokens=prompt_tokens, completionTokens=completion_tokens)

@@ -262,9 +262,18 @@ def tx_get(tx_id: str, tenant: str) -> dict[str, Any] | None:
             "idempotencyKey": row["idempotency_key"], "payload": json.loads(row["payload_json"] or "{}")}
 
 
-def tx_list(tenant: str, limit: int = 50) -> list[dict[str, Any]]:
-    rows = _fetch_all("SELECT * FROM transactions WHERE tenant=? ORDER BY created_at DESC LIMIT ?",
-                      (tenant, limit))
+def tx_list(tenant: str, limit: int = 50, offset: int = 0,
+           state: str = "") -> list[dict[str, Any]]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
+    if state:
+        rows = _fetch_all("SELECT * FROM transactions WHERE tenant=? AND state=? "
+                          "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                          (tenant, state, lim, off))
+    else:
+        rows = _fetch_all("SELECT * FROM transactions WHERE tenant=? "
+                          "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                          (tenant, lim, off))
     return [{"id": r["id"], "state": r["state"], "amountMinor": r["amount_minor"],
              "currency": r["currency"], "provider": r["provider"],
              "providerRef": r["provider_ref"]} for r in rows]
@@ -319,9 +328,18 @@ def evm_get(pid: str, tenant: str) -> dict[str, Any] | None:
             "confirmations": row["confirmations"], "expires_at": row["expires_at"]}
 
 
-def evm_list(tenant: str, limit: int = 50) -> list[dict[str, Any]]:
-    rows = _fetch_all("SELECT * FROM evm_payments WHERE tenant=? ORDER BY created_at DESC LIMIT ?",
-                      (tenant, limit))
+def evm_list(tenant: str, limit: int = 50, offset: int = 0,
+             state: str = "") -> list[dict[str, Any]]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
+    if state:
+        rows = _fetch_all("SELECT * FROM evm_payments WHERE tenant=? AND state=? "
+                          "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                          (tenant, state, lim, off))
+    else:
+        rows = _fetch_all("SELECT * FROM evm_payments WHERE tenant=? "
+                          "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                          (tenant, lim, off))
     return [{"id": r["id"], "chain_id": r["chain_id"], "to": r["to_address"],
              "value_wei": r["value_wei"], "state": r["state"], "tx_hash": r["tx_hash"],
              "confirmations": r["confirmations"]} for r in rows]
@@ -347,9 +365,17 @@ def pag_get(ag_id: str, tenant: str) -> dict[str, Any] | None:
     return json.loads(row["document_json"])
 
 
-def pag_list(tenant: str, limit: int = 50) -> list[dict[str, Any]]:
-    rows = _fetch_all("SELECT document_json FROM contract_agreements WHERE tenant=? LIMIT ?",
-                      (tenant, limit))
+def pag_list(tenant: str, limit: int = 50, offset: int = 0,
+             state: str = "") -> list[dict[str, Any]]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
+    if state:
+        rows = _fetch_all("SELECT document_json FROM contract_agreements "
+                          "WHERE tenant=? AND state=? LIMIT ? OFFSET ?",
+                          (tenant, state, lim, off))
+    else:
+        rows = _fetch_all("SELECT document_json FROM contract_agreements WHERE tenant=? LIMIT ? OFFSET ?",
+                          (tenant, lim, off))
     out = []
     for r in rows:
         d = json.loads(r["document_json"])

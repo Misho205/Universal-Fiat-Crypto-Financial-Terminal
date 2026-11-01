@@ -62,6 +62,13 @@ export default function AgreementsPanel({ modal, locale }: { modal: ModalBackend
           const d = g.data as { state: string; conditionStatuses: Record<string, string> };
           return modal.aiExplainState({ state: d.state, conditionStatuses: d.conditionStatuses ?? {}, reasons: [] });
         })}>{t.whyState}</button>
+        <button style={btn} disabled={!agId} onClick={() => run(async () => {
+          const g = await modal.pagGet(agId);
+          const terms = (g.data as { terms: unknown }).terms;
+          const r = await modal.aiContract(terms);
+          const env = r.data as { validated: boolean; notice: string; data: { gaps: string[]; recommendation: string } };
+          return { validated: env.validated, notice: env.notice, gaps: env.data?.gaps ?? [], recommendation: env.data?.recommendation ?? "" };
+        })}>AI analysis</button>
       </div>
       {out.kind === "idle" && <p style={{ color: "#666" }}>{t.empty}</p>}
       {out.kind === "loading" && <p aria-live="polite">{t.loading}</p>}

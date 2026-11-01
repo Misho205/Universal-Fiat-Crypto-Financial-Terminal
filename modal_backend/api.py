@@ -28,7 +28,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from . import ai, config, contracts, meta_client, payments, programmable, providers, store
@@ -153,12 +153,19 @@ class AiAssistantIn(BaseModel):
 
 def _ai_or_429(fn, *args: Any) -> dict[str, Any]:
     """Run an advisory AI service; map rate limiting to HTTP 429."""
+    tenant = args[-1] if args and isinstance(args[-1], str) else ""
+    stub = not meta_client.has_key()
     try:
-        return fn(*args)
+        out = fn(*args)
     except meta_client.MetaClientError as exc:
         if exc.code == "RATE_LIMITED":
             raise HTTPException(status_code=429, detail="AI rate limit exceeded") from exc
         raise HTTPException(status_code=503, detail=f"AI_ERROR:{exc.code}") from exc
+    if stub and tenant:
+        # Offline stubs return before ai.py records usage; count the call
+        # per-tenant so /api/ai/usage reflects real activity.
+        meta_client.record_usage(fallback=True, tenant=tenant)
+    return out
 
 
 # ---------- Routes ----------
@@ -173,7 +180,10 @@ async def health() -> dict[str, Any]:
 async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth)) -> dict[str, Any]:
     log_event(logger, "ai.analyze", caller=caller)
     draft = ai.draft_agreement_brief(body.order)
-    return {"draft": draft, "authoritative": False,
+    # Standard advisory envelope (legacy "draft" shape preserved inside data).
+    return {"kind": "draft", "data": {"draft": draft}, "validated": True,
+            "model": draft.get("model", "stub (no key)"), "advisoryOnly": True,
+            "authoritative": False,
             "notice": "AI output is advisory only; validator + human acceptance required."}
 
 
@@ -230,7 +240,7 @@ async def ai_assistant(body: AiAssistantIn, tenant: str = Depends(require_tenant
 async def ai_usage(tenant: str = Depends(require_tenant),
                    caller: str = Depends(require_auth)) -> dict[str, Any]:
     from .meta_client import usage_snapshot
-    snap = usage_snapshot()
+    snap = usage_snapshot(tenant=tenant)
     log_event(logger, "ai.usage.read", caller=caller)
     return {"tenant": tenant, "calls": snap["calls"], "fallbacks": snap["fallbacks"],
             "promptTokens": snap["prompt_tokens"], "completionTokens": snap["completion_tokens"],
@@ -416,21 +426,31 @@ async def fiat_retrieve(payment_id: str, tenant: str = Depends(require_tenant),
     log_event(logger, "payment.fiat.retrieved", tenant=tenant, caller=caller, transactionId=payment_id)
     return {"paymentId": payment_id, "state": rec["state"], "provider": rec.get("provider"),
             "providerRef": rec.get("providerRef"), "amountMinor": rec.get("amountMinor"),
-            "currency": rec.get("currency"), "sandbox": True}
+            "currency": rec.get("currency"), "idempotencyKey": rec.get("idempotencyKey", ""),
+            "sandbox": True}
 
 
 @app.get("/api/payments/fiat")
 async def fiat_list(tenant: str = Depends(require_tenant),
-                    caller: str = Depends(require_auth)) -> dict[str, Any]:
-    items = db_tx_list(tenant)
+                    caller: str = Depends(require_auth),
+                    limit: int = 50, offset: int = 0, state: str = "") -> dict[str, Any]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
+    items = db_tx_list(tenant, limit=lim, offset=off, state=state)
     log_event(logger, "payment.fiat.listed", tenant=tenant, caller=caller, count=len(items))
-    return {"payments": items, "sandbox": True}
+    return {"payments": items, "sandbox": True,
+            "pagination": {"limit": lim, "offset": off, "state": state}}
 
 
 @app.post("/api/payments/fiat/{payment_id}/cancel")
 async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_admin)) -> dict[str, Any]:
-    """Admin only: cancels a non-terminal payment (money movement)."""
+                      caller: str = Depends(require_admin),
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
+    """Admin only: cancels a non-terminal payment (money movement). Idempotent via Idempotency-Key."""
+    key = _idem_key(tenant, f"fiat-cancel:{payment_id}", idempotency_key, {"payment_id": payment_id})
+    hit = store.idem_lookup(key)
+    if hit:
+        return _public(hit["response"])
     rec = _load_owned(payment_id, tenant)
     if rec["state"] not in ("created", "pending", "unknown"):
         raise HTTPException(status_code=409, detail=f"cannot cancel from state {rec['state']}")
@@ -441,13 +461,24 @@ async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
     db_tx_upsert({**rec, "id": payment_id, "tenant": tenant,
                   "amountMinor": rec.get("amountMinor", "0"), "state": result.state,
                   "providerRef": result.provider_ref, "payload": rec.get("payload", {})})
-    return {"paymentId": payment_id, "state": result.state, "sandbox": True}
+    response = {"paymentId": payment_id, "state": result.state, "sandbox": True}
+    store.idem_store(key, {"payload": {"payment_id": payment_id}, "response": response})
+    log_event(logger, "payment.fiat.canceled", tenant=tenant, caller=caller, transactionId=payment_id)
+    return response
 
 
 @app.post("/api/payments/fiat/{payment_id}/refund")
 async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_admin)) -> dict[str, Any]:
-    """Admin only: refunds a succeeded payment (money movement)."""
+                      caller: str = Depends(require_admin),
+                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
+    """Admin only: refunds a succeeded payment (money movement). Idempotent via Idempotency-Key."""
+    payload = {"payment_id": payment_id, **body.model_dump()}
+    key = _idem_key(tenant, f"fiat-refund:{payment_id}", idempotency_key, payload)
+    hit = store.idem_lookup(key)
+    if hit:
+        if hit["payload"] != payload:
+            raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
+        return _public(hit["response"])
     rec = _load_owned(payment_id, tenant)
     if rec["state"] != "succeeded":
         raise HTTPException(status_code=409, detail="only succeeded payments can be refunded")
@@ -460,7 +491,9 @@ async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends
                   "amountMinor": rec.get("amountMinor", "0"), "state": result.state,
                   "providerRef": result.provider_ref, "payload": rec.get("payload", {})})
     log_event(logger, "payment.fiat.refunded", tenant=tenant, caller=caller, transactionId=payment_id)
-    return {"paymentId": payment_id, "state": result.state, "refundRef": result.provider_ref, "sandbox": True}
+    response = {"paymentId": payment_id, "state": result.state, "refundRef": result.provider_ref, "sandbox": True}
+    store.idem_store(key, {"payload": payload, "response": response})
+    return response
 
 
 @app.post("/api/webhooks/stripe")
@@ -608,10 +641,14 @@ async def evm_replace(payment_id: str, body: EvmReplaceIn, tenant: str = Depends
 
 @app.get("/api/payments/evm")
 async def evm_list(tenant: str = Depends(require_tenant),
-                   caller: str = Depends(require_auth)) -> dict[str, Any]:
+                   caller: str = Depends(require_auth),
+                   limit: int = 50, offset: int = 0, state: str = "") -> dict[str, Any]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
     items = [{**p, "explorer": evm_mod.explorer_link(p["tx_hash"]) if p.get("tx_hash") else None}
-             for p in _db.evm_list(tenant)]
-    return {"payments": items, "chainId": evm_mod.SEPOLIA_CHAIN_ID, "sandbox": True}
+             for p in _db.evm_list(tenant, limit=lim, offset=off, state=state)]
+    return {"payments": items, "chainId": evm_mod.SEPOLIA_CHAIN_ID, "sandbox": True,
+            "pagination": {"limit": lim, "offset": off, "state": state}}
 
 
 # ---------- programmable fiat agreements (deterministic, sandbox) ----------
@@ -798,8 +835,12 @@ async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends
 
 @app.get("/api/contracts/programmable")
 async def pag_list(tenant: str = Depends(require_tenant),
-                   caller: str = Depends(require_auth)) -> dict[str, Any]:
-    return {"agreements": _db.pag_list(tenant), "sandbox": True,
+                   caller: str = Depends(require_auth),
+                   limit: int = 50, offset: int = 0, state: str = "") -> dict[str, Any]:
+    lim = max(1, min(limit, 200))
+    off = max(0, offset)
+    return {"agreements": _db.pag_list(tenant, limit=lim, offset=off, state=state),
+            "sandbox": True, "pagination": {"limit": lim, "offset": off, "state": state},
             "disclosure": programmable.DISCLOSURE}
 
 
@@ -833,27 +874,30 @@ async def dashboard_summary(tenant: str = Depends(require_tenant),
 async def dashboard_recent(tenant: str = Depends(require_tenant),
                            caller: str = Depends(require_auth),
                            kind: str = "all", state: str = "", q: str = "",
-                           limit: int = 50) -> dict[str, Any]:
+                           limit: int = 50, offset: int = 0) -> dict[str, Any]:
     """Combined, filterable history: kind in {all,fiat,evm,agreement}, optional
     state substring and id/providerRef substring filters. Newest first."""
     lim = max(1, min(limit, 200))
+    off = max(0, offset)
     items: list[dict[str, Any]] = []
     if kind in ("all", "fiat"):
-        for p in db_tx_list(tenant, limit=lim):
+        for p in db_tx_list(tenant, limit=lim + off):
             items.append({"kind": "fiat", "id": p["id"], "state": p["state"],
                           "detail": f'{p.get("amountMinor", "?")} {p.get("currency", "")} via {p.get("provider", "")}',
-                          "ref": p.get("providerRef", "")})
+                          "ref": p.get("providerRef", ""),
+                          "provider": p.get("provider", "mock"), "sandbox": True})
     if kind in ("all", "evm"):
-        for p in _db.evm_list(tenant, limit=lim):
+        for p in _db.evm_list(tenant, limit=lim + off):
             items.append({"kind": "evm", "id": p["id"], "state": p["state"],
                           "detail": f'{p.get("value_wei", "?")} wei to {p.get("to", "")}',
                           "ref": p.get("tx_hash", ""),
+                          "provider": "sepolia-rpc", "sandbox": True,
                           "explorer": evm_mod.explorer_link(p["tx_hash"]) if p.get("tx_hash") else None})
     if kind in ("all", "agreement"):
-        for p in _db.pag_list(tenant, limit=lim):
+        for p in _db.pag_list(tenant, limit=lim + off):
             items.append({"kind": "agreement", "id": p["id"], "state": p["state"],
                           "detail": f"v{p.get('version', 1)} updated {p.get('updatedAt', '')}",
-                          "ref": ""})
+                          "ref": "", "provider": "deterministic-engine", "sandbox": True})
     if state:
         items = [i for i in items if state.lower() in i["state"].lower()]
     if q:
@@ -861,4 +905,84 @@ async def dashboard_recent(tenant: str = Depends(require_tenant),
         items = [i for i in items if ql in i["id"].lower() or ql in i["ref"].lower()
                  or ql in i["detail"].lower()]
     log_event(logger, "dashboard.recent", tenant=tenant, caller=caller, count=len(items))
-    return {"items": items[:lim], "sandbox": True}
+    page = items[off:off + lim]
+    return {"items": page, "sandbox": True,
+            "pagination": {"limit": lim, "offset": off, "total": len(items)}}
+
+
+@app.post("/api/reconcile/runs")
+async def reconcile_run(tenant: str = Depends(require_tenant),
+                        caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Sandbox reconcile sweep: counts UNKNOWN/timeout fiat + non-terminal EVM.
+
+    Read-only triage (does not move funds). Mirrors the NestJS
+    `POST /v1/reconcile/runs` shape so the Banking Reconcile view works
+    against the Modal backend too.
+    """
+    fiat = db_tx_list(tenant, limit=1000)
+    unknowns = [p for p in fiat if p["state"] in ("unknown",)]
+    evm_items = _db.evm_list(tenant, limit=1000)
+    evm_open = [p for p in evm_items if p["state"] in ("requested", "pending")]
+    run_id = f"rec-{uuid.uuid4().hex[:12]}"
+    log_event(logger, "reconcile.run", tenant=tenant, caller=caller,
+              runId=run_id, unknowns=len(unknowns), evmOpen=len(evm_open))
+    return {"runId": run_id, "tenant": tenant, "sandbox": True,
+            "unknownFiat": len(unknowns), "openEvm": len(evm_open),
+            "note": "Triage only. Re-query receipts/webhooks to resolve UNKNOWN; confirmed != settled."}
+
+
+@app.get("/api/dashboard/export")
+async def dashboard_export(tenant: str = Depends(require_tenant),
+                           caller: str = Depends(require_auth),
+                           kind: str = "all", format: str = "csv") -> Response:
+    """Server-side export of the tenant history. Only `csv` is supported."""
+    if format != "csv":
+        raise HTTPException(status_code=422, detail="only format=csv is supported")
+    lim = 1000
+    rows: list[list[str]] = [["kind", "id", "state", "detail", "ref", "provider", "sandbox"]]
+    for p in db_tx_list(tenant, limit=lim):
+        if kind in ("all", "fiat"):
+            detail = f'{p.get("amountMinor", "?")} {p.get("currency", "")} via {p.get("provider", "")}'
+            rows.append(["fiat", p["id"], p["state"], detail, p.get("providerRef", ""),
+                         p.get("provider", "mock"), "true"])
+    if kind in ("all", "evm"):
+        for p in _db.evm_list(tenant, limit=lim):
+            rows.append(["evm", p["id"], p["state"],
+                         f'{p.get("value_wei", "?")} wei to {p.get("to", "")}',
+                         p.get("tx_hash", ""), "sepolia-rpc", "true"])
+    if kind in ("all", "agreement"):
+        for p in _db.pag_list(tenant, limit=lim):
+            rows.append(["agreement", p["id"], p["state"],
+                         f'v{p.get("version", 1)} updated {p.get("updatedAt", "")}',
+                         "", "deterministic-engine", "true"])
+    import csv as _csv
+    import io as _io
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerows(rows)
+    log_event(logger, "dashboard.export", tenant=tenant, caller=caller, rows=len(rows) - 1)
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=hybridpay-report.csv"})
+
+
+@app.post("/api/webhooks/stripe/test")
+async def stripe_webhook_test(tenant: str = Depends(require_tenant),
+                              caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Sandbox helper: build a signed sample Stripe event for webhook verification demos.
+
+    Returns the exact body + `stripe-signature` header value to POST to
+    `/api/webhooks/stripe`. Never touches live rails; uses the TEST webhook
+    secret when configured, otherwise a documented demo secret.
+    """
+    import hashlib as _hl
+    import hmac as _hmac
+    import json as _json
+    sample = {"id": f"evt_test_{uuid.uuid4().hex[:12]}", "type": "payment_intent.succeeded",
+              "payment_intent": "pi_test_sample", "tenant": tenant}
+    raw = _json.dumps(sample).encode()
+    secret = config.STRIPE_WEBHOOK_SECRET_TEST or "demo-webhook-secret"
+    sig = _hmac.new(secret.encode(), raw, _hl.sha256).hexdigest()
+    return {"postTo": "/api/webhooks/stripe", "body": sample,
+            "headers": {"stripe-signature": f"t={int(time.time())},v1={sig}"},
+            "note": "Demo only. Uses TEST secret when set; the event is clearly labeled evt_test_.",
+            "sandbox": True}

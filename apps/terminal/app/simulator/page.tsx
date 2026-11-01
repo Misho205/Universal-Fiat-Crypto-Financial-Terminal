@@ -17,7 +17,7 @@ const SCENARIOS: { id: ScenarioId; bg: string; en: string }[] = [
 ];
 
 export default function Simulator() {
-  const [locale, setLocale] = useState<"bg" | "en">("bg");
+  const [locale] = useState<"bg" | "en">("en");
   const [tenant] = useState("demo-tenant");
   const [runs, setRuns] = useState<Run[]>([]);
   const [busy, setBusy] = useState<ScenarioId | null>(null);
@@ -63,8 +63,7 @@ export default function Simulator() {
         {locale === "bg" ? "СИМУЛАТОР — само пробни транзакции, без реални пари." : "SIMULATOR — trial transactions only, no real money."}
       </div>
       <div style={{ marginTop: 8 }}>
-        <button onClick={() => setLocale(locale === "bg" ? "en" : "bg")}>{locale === "bg" ? "EN" : "БГ"}</button>
-        <a href="/" style={{ marginLeft: 12 }}>{locale === "bg" ? "← Обратно към терминала" : "← Back to terminal"}</a>
+        <a href="/">{locale === "bg" ? "← Обратно към терминала" : "← Back to terminal"}</a>
       </div>
       <h1>{locale === "bg" ? "Визуален симулатор за пробни тестове" : "Visual simulator for trial tests"}</h1>
       <p style={{ color: "#555" }}>Modal: {MODAL_URL} · {locale === "bg" ? "Всеки сценарий е безопасен — sandbox/testnet или локална симулация." : "Every scenario is safe — sandbox/testnet or local simulation."}</p>

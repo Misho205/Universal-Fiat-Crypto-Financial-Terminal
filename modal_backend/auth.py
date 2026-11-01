@@ -73,7 +73,30 @@ def caller_role(authorization: str | None = Header(default=None)) -> str:
     return role_of(authorization) or "anonymous"
 
 
-def require_tenant(x_tenant_id: str | None = Header(default=None)) -> str:
+def require_tenant(authorization: str | None = Header(default=None, alias="Authorization"),
+                   x_tenant_id: str | None = Header(default=None, alias="X-Tenant-Id")) -> str:
+    """Tenant from authenticated server-side context when bound, else the header.
+
+    If TENANT_FOR_SHARED_TOKEN / TENANT_FOR_ADMIN_TOKEN is configured, the tenant
+    is DERIVED from the bearer token and the client-supplied X-Tenant-Id header is
+    ignored entirely (never trusted for authorization). Without bindings (local
+    dev), the header is accepted and the caller is marked accordingly.
+    """
+    role = role_of(authorization)
+    if role == "admin" and config.TENANT_FOR_ADMIN_TOKEN:
+        return config.TENANT_FOR_ADMIN_TOKEN
+    if role == "operator" and config.TENANT_FOR_SHARED_TOKEN:
+        return config.TENANT_FOR_SHARED_TOKEN
+    if not config.API_SHARED_TOKEN and not config.API_ADMIN_TOKEN:
+        if not x_tenant_id:
+            raise HTTPException(status_code=400, detail="missing X-Tenant-Id")
+        return x_tenant_id  # bare local dev only
+    if role is None:
+        # Not authenticated: keep the header requirement so auth failures surface
+        # as 401 (require_auth runs alongside), not as confusing 400s.
+        if not x_tenant_id:
+            raise HTTPException(status_code=400, detail="missing X-Tenant-Id")
+        return x_tenant_id
     if not x_tenant_id:
         raise HTTPException(status_code=400, detail="missing X-Tenant-Id")
     return x_tenant_id

@@ -15,28 +15,25 @@ import { Button } from "../../src/components/ui/button";
 import { Card, CardTitle } from "../../src/components/ui/card";
 import { StateBarChart } from "../../src/components/ui/chart";
 import { Field, Input, Select } from "../../src/components/ui/field";
-import { Money } from "../../src/components/ui/money";
-import { StatusBadge } from "../../src/components/ui/badge";
+import { StatusBadge, SandboxBadge } from "../../src/components/ui/badge";
 import { Tabs } from "../../src/components/ui/tabs";
+import { usePolling } from "../../src/lib/polling";
 
 type View = "overview" | "ops" | "contracts" | "risk" | "admin" | "analytics" | "assistant";
 
 export default function BankingPage() {
-  const [locale, setLocale] = React.useState<"bg" | "en">("bg");
+  const [locale] = React.useState<"bg" | "en">("en");
   const s = useSession();
   const isAdmin = s.role === "admin";
   const [view, setView] = React.useState<View>("overview");
   const { summary, busy, err, refresh } = useDashboard(s.modal, s.tenant, s.token);
-  const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
+  const t = (bg: string, en: string) => en;
 
   return (
     <Shell locale={locale} role={s.role}>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Landmark aria-hidden /> {t("Банков работен плот", "Banking Workspace")}</h1>
         <span className="rounded-full bg-[rgb(var(--warn-bg))] px-2.5 py-0.5 text-xs font-bold text-[rgb(var(--warn))]">SANDBOX · ADMIN</span>
-        <button onClick={() => setLocale(locale === "bg" ? "en" : "bg")} className="ml-auto rounded-full border border-line px-3 py-1 text-sm font-semibold">
-          {locale === "bg" ? "EN" : "БГ"}
-        </button>
       </div>
       {!isAdmin && (
         <Alert tone="warn" className="mb-4">
@@ -140,50 +137,55 @@ function OpsView({ modal, tenant, token, isAdmin, locale, onChanged }: {
   const [kind, setKind] = React.useState("all");
   const [stateF, setStateF] = React.useState("");
   const [q, setQ] = React.useState("");
+  const [page, setPage] = React.useState(0);
+  const PAGE_SIZE = 20;
   const [items, setItems] = React.useState<{ kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }[]>([]);
+  const [total, setTotal] = React.useState(0);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
-  const [detail, setDetail] = React.useState("");
+  const [selected, setSelected] = React.useState<null | { kind: string; id: string }>(null);
+  const [autoTrack, setAutoTrack] = React.useState(true);
   const [mc, setMc] = React.useState<null | { paymentId: string; action: "cancel" | "refund" }>(null);
+  const [reconOut, setReconOut] = React.useState("");
 
-  async function load() {
+  async function load(nextPage = page) {
     setBusy(true); setErr("");
     try {
-      const r = await modal.dashboardRecent({ kind, state: stateF || undefined, q: q || undefined, limit: 100 });
-      setItems((r.data as { items: typeof items }).items);
+      const r = await modal.dashboardRecent({ kind, state: stateF || undefined, q: q || undefined, limit: PAGE_SIZE, offset: nextPage * PAGE_SIZE });
+      const d = r.data as { items: typeof items; pagination?: { total: number } };
+      setItems(d.items);
+      setTotal(d.pagination?.total ?? d.items.length);
     } catch (e) { setErr(friendly(e)); }
     finally { setBusy(false); }
   }
   function friendly(e: unknown) { return e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200); }
-  React.useEffect(() => { load(); }, [tenant, token]);
+  React.useEffect(() => { load(0); }, [tenant, token]);
+  React.useEffect(() => { setSelected(null); }, [tenant]);
 
-  async function viewDetail(kind_: string, id: string) {
-    setDetail("…");
-    try {
-      if (kind_ === "fiat") {
-        const r = await modal.fiatGet(id);
-        setDetail(JSON.stringify(r.data, null, 2));
-      } else if (kind_ === "evm") {
-        const r = await modal.evmStatus(id);
-        setDetail(JSON.stringify(r.data, null, 2));
-      } else {
-        const r = await modal.pagGet(id);
-        const d = r.data as { state: string; conditionStatuses: unknown; eligible: boolean; history: unknown[] };
-        setDetail(JSON.stringify({ state: d.state, eligible: d.eligible, conditionStatuses: d.conditionStatuses, historyLength: (d.history as unknown[]).length }, null, 2));
-      }
-    } catch (e) { setDetail(friendly(e)); }
-  }
+  // Live detail with safe polling: backoff, abort on unmount/change, stops on terminal states.
+  const polled = usePolling(async () => {
+    if (!selected) return null;
+    if (selected.kind === "fiat") return (await modal.fiatGet(selected.id)).data as unknown as Record<string, unknown>;
+    if (selected.kind === "evm") return (await modal.evmStatus(selected.id)).data as unknown as Record<string, unknown>;
+    const d = (await modal.pagGet(selected.id)).data as { state: string; eligible: boolean; conditionStatuses: unknown; disclosure?: string };
+    return { state: d.state, eligible: d.eligible, conditionStatuses: d.conditionStatuses } as unknown as Record<string, unknown>;
+  }, {
+    enabled: !!selected && autoTrack,
+    isTerminal: (v) => !!v && typeof v.state === "string" &&
+      ["succeeded", "failed", "canceled", "refunded", "confirmed", "expired", "completed"].includes(v.state as string),
+  });
 
   async function makerApprove(maker: string, checker: string, reason: string) {
     if (!mc) return;
     setErr("");
     try {
-      // Maker-checker recorded in the idempotency key; backend additionally requires admin.
-      const key = `mc-${maker}-${checker}-${Date.now()}`;
+      // Maker-checker is enforced in the UI (two distinct actors + reason);
+      // the backend additionally requires an admin token. Cancel/refund are
+      // idempotent: the idempotency key makes safe retries possible.
       void reason;
-      if (mc.action === "cancel") await modal.fiatCancel(mc.paymentId).catch(async (e) => { throw e; });
-      else await modal.fiatRefund(mc.paymentId);
-      void key;
+      const key = `mc-${maker}-${checker}-${Date.now()}`;
+      if (mc.action === "cancel") await modal.fiatCancel(mc.paymentId, key);
+      else await modal.fiatRefund(mc.paymentId, undefined, key);
       load(); onChanged();
     } catch (e) { setErr(friendly(e)); }
     finally { setMc(null); }
@@ -199,12 +201,19 @@ function OpsView({ modal, tenant, token, isAdmin, locale, onChanged }: {
           <Field label="Kind"><Select value={kind} onChange={(e) => setKind(e.target.value)}>{["all", "fiat", "evm", "agreement"].map((k) => <option key={k} value={k}>{k}</option>)}</Select></Field>
           <Field label="State"><input value={stateF} onChange={(e) => setStateF(e.target.value)} placeholder="pending…" className="rounded-[10px] border border-line bg-surface px-3 py-2" /></Field>
           <Field label="Search"><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="id / ref…" className="rounded-[10px] border border-line bg-surface px-3 py-2" /></Field>
-          <button onClick={load} disabled={busy} className="self-end rounded-[10px] bg-brand-600 px-4 py-2 text-sm font-semibold text-white">{locale === "bg" ? "Търси" : "Search"}</button>
+          <button onClick={() => { setPage(0); load(0); }} disabled={busy} className="self-end rounded-[10px] bg-brand-600 px-4 py-2 text-sm font-semibold text-white">Search</button>
         </div>
         {err && <Alert tone="danger" className="mt-2">{err}</Alert>}
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          <button disabled={busy || page === 0} onClick={() => { const p = Math.max(0, page - 1); setPage(p); load(p); }} className="rounded-lg border border-line px-3 py-1 font-semibold">← Prev</button>
+          <span className="text-muted">Page {page + 1}{total ? ` · ${total} records` : ""}</span>
+          <button disabled={busy || items.length < PAGE_SIZE} onClick={() => { const p = page + 1; setPage(p); load(p); }} className="rounded-lg border border-line px-3 py-1 font-semibold">Next →</button>
+        </div>
         <div className="mt-3">
+          {/* Row-level Cancel/Refund intentionally disabled: all money actions go
+              through the maker-checker dialog below (distinct maker+checker), even for admins. */}
           <TxTable items={items} modal={modal} isAdmin={false} locale={locale} onChanged={() => { load(); onChanged(); }}
-            onView={(i) => viewDetail(i.kind, i.id)} />
+            onView={(i) => setSelected({ kind: i.kind, id: i.id })} />
           <p className="muted mt-1 text-xs">{locale === "bg" ? "Cancel/Refund са admin и минават през maker-checker по-долу." : "Cancel/Refund are admin-only and go through maker-checker below."}</p>
           {isAdmin && items.some((i) => i.kind === "fiat" && ["pending", "unknown", "succeeded"].includes(i.state)) && (
             <div className="mt-2 flex flex-wrap gap-2">
@@ -219,17 +228,67 @@ function OpsView({ modal, tenant, token, isAdmin, locale, onChanged }: {
             </div>
           )}
         </div>
-        {detail && <pre className="ok mt-2">{detail}</pre>}
+        {selected && (
+          <div className="mt-2 rounded-xl border border-line p-3">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <strong className="text-sm">{locale === "bg" ? "Детайл" : "Detail"}: <code className="num">{selected.id}</code></strong>
+              <label className="ml-auto flex items-center gap-1 text-xs">
+                <input type="checkbox" checked={autoTrack} onChange={(e) => setAutoTrack(e.target.checked)} />
+                {locale === "bg" ? "живо проследяване" : "live tracking"}
+              </label>
+              <button className="text-xs underline" onClick={() => setSelected(null)}>{locale === "bg" ? "затвори" : "close"}</button>
+            </div>
+            {polled.error && <Alert tone="danger">{polled.error} <button className="underline" onClick={polled.reset}>{locale === "bg" ? "Опитай отново" : "Retry"}</button></Alert>}
+            {!polled.data && !polled.error && <p className="muted text-sm" aria-live="polite">{locale === "bg" ? "Зарежда…" : "Loading…"}</p>}
+            {polled.data && (
+              <>
+                <div className="mb-1 flex flex-wrap items-center gap-2 text-sm">
+                  <StatusBadge state={String(polled.data.state ?? "?")} />
+                  {(polled.data as { provider?: string }).provider && <span className="rounded bg-[rgb(var(--line))] px-1.5 py-0.5 text-[11px] font-semibold">{String((polled.data as { provider?: string }).provider)}</span>}
+                  <SandboxBadge />
+                  {(polled.data as { idempotencyKey?: string }).idempotencyKey && (
+                    <span className="text-xs text-muted" title={locale === "bg" ? "Ключ против дублиране" : "Duplicate-protection key"}>
+                      idem: <code>{String((polled.data as { idempotencyKey?: string }).idempotencyKey).slice(0, 24)}…</code>
+                    </span>
+                  )}
+                </div>
+                <pre className="ok">{JSON.stringify(polled.data, null, 2).slice(0, 2000)}</pre>
+              </>
+            )}
+          </div>
+        )}
       </Card>
       <MakerCheckerDialog open={!!mc} onClose={() => setMc(null)} onApprove={makerApprove}
         action={mc?.action ?? ""} target={mc?.paymentId ?? ""} locale={locale} />
       <Card>
-        <CardTitle>{locale === "bg" ? "Статус на равнение (reconciliation)" : "Reconciliation status"}</CardTitle>
+        <CardTitle>Reconciliation status</CardTitle>
         {unknowns.length === 0
-          ? <p className="muted text-sm">{locale === "bg" ? "Няма UNKNOWN инструкции за равнение." : "No UNKNOWN instructions awaiting reconcile."}</p>
-          : <Alert tone="warn">{locale === "bg"
-            ? `${unknowns.length} UNKNOWN — потърсете оригинала преди повторен опит (query-original, без failover). Пълен reconcile run: POST /v1/reconcile/runs в Nest API.`
-            : `${unknowns.length} UNKNOWN — query the original before retry (no failover). Full reconcile: POST /v1/reconcile/runs on the Nest API.`}</Alert>}
+          ? <p className="muted text-sm">No UNKNOWN instructions awaiting reconcile.</p>
+          : <Alert tone="warn">{`${unknowns.length} UNKNOWN — query the original before retry (no failover).`}</Alert>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={busy} onClick={async () => {
+            setBusy(true); setErr(""); setReconOut("");
+            try {
+              const r = await modal.reconcileRun();
+              const d = r.data as { runId: string; unknownFiat: number; openEvm: number; note: string };
+              setReconOut(`Reconcile ${d.runId}: ${d.unknownFiat} unknown fiat, ${d.openEvm} open EVM. ${d.note}`);
+              load(page); onChanged();
+            } catch (e) { setErr(friendly(e)); }
+            finally { setBusy(false); }
+          }}>Run reconcile sweep</Button>
+          <Button variant="secondary" disabled={busy} onClick={async () => {
+            try {
+              const r = await modal.dashboardExportCsv(kind);
+              const blob = new Blob([r.data], { type: "text/csv" });
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = "hybridpay-server-report.csv";
+              a.click();
+              URL.revokeObjectURL(a.href);
+            } catch (e) { setErr(friendly(e)); }
+          }}>Download server CSV</Button>
+        </div>
+        {reconOut && <pre className="ok mt-2">{reconOut}</pre>}
       </Card>
     </div>
   );
@@ -427,11 +486,22 @@ function AnalyticsView({ modal, locale }: { modal: ModalBackendClient; locale: "
         <p className="muted text-xs">{locale === "bg" ? "проследени записа" : "tracked records"}</p>
       </Card>
       <Card>
-        <CardTitle>{locale === "bg" ? "Експорт" : "Export"}</CardTitle>
-        <p className="muted mb-2 text-sm">{locale === "bg" ? "CSV от реално заредените записи (клиентски експорт)." : "CSV of the actually loaded records (client-side export)."}</p>
-        <Button variant="secondary" disabled={!items.length} onClick={downloadCsv}>
-          {locale === "bg" ? `Изтегли CSV (${items.length})` : `Download CSV (${items.length})`}
-        </Button>
+        <CardTitle>Export</CardTitle>
+        <p className="muted mb-2 text-sm">CSV of the actually loaded records (client-side export) or the full server history.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={!items.length} onClick={downloadCsv}>
+            {`Download CSV (${items.length})`}
+          </Button>
+          <Button variant="secondary" onClick={async () => {
+            const r = await modal.dashboardExportCsv("all");
+            const blob = new Blob([r.data], { type: "text/csv" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "hybridpay-server-report.csv";
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }}>Download full server CSV</Button>
+        </div>
       </Card>
     </div>
   );

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { HybridPayClient, ModalBackendClient, ApiError, friendlyError, resolveBaseUrl } from "../src/index.js";
+import { HybridPayClient, ModalBackendClient, ApiError, friendlyError, resolveBaseUrl,
+         assertMinorUnits, assertEvmAddress, assertTxHash, assertChainId } from "../src/index.js";
 
 function mockFetchOnce(status: number, data: unknown) {
   const fn = vi.fn(async () => ({ ok: status < 400, status, json: async () => data }));
@@ -105,9 +106,69 @@ describe("ai", () => {
     const [, opts] = fn.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
     expect(opts.headers.Authorization).toBe("Bearer tok");
     const fn2 = mockFetchOnce(200, { items: [], sandbox: true });
-    await c.dashboardRecent({ kind: "fiat", state: "pending", q: "pay-" });
-    const [url2] = fn2.mock.calls[0] as unknown as [string];
+    await c.dashboardRecent({ kind: "fiat", state: "pending", q: "pay-", limit: 2, offset: 4 });
+    const [[url2]] = fn2.mock.calls as unknown as [[string]];
     expect(url2).toMatch(/kind=fiat/);
     expect(url2).toMatch(/state=pending/);
+    expect(url2).toMatch(/limit=2/);
+    expect(url2).toMatch(/offset=4/);
+  });
+  it("list endpoints carry limit/offset/state", async () => {
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    const fn = mockFetchOnce(200, { payments: [], sandbox: true });
+    await c.fiatList({ limit: 2, offset: 6, state: "created" });
+    expect((fn.mock.calls[0] as unknown as [string])[0]).toMatch(/limit=2/);
+    expect((fn.mock.calls[0] as unknown as [string])[0]).toMatch(/offset=6/);
+    expect((fn.mock.calls[0] as unknown as [string])[0]).toMatch(/state=created/);
+    const fn2 = mockFetchOnce(200, { payments: [], sandbox: true });
+    await c.evmList({ limit: 1, offset: 1 });
+    expect((fn2.mock.calls[0] as unknown as [string])[0]).toMatch(/offset=1/);
+    const fn3 = mockFetchOnce(200, { agreements: [], sandbox: true });
+    await c.pagList({ limit: 5, offset: 10, state: "draft" });
+    expect((fn3.mock.calls[0] as unknown as [string])[0]).toMatch(/state=draft/);
+  });
+  it("money actions send idempotency keys; ops endpoints are reachable", async () => {
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    const fn = mockFetchOnce(200, { paymentId: "p1", state: "canceled", sandbox: true });
+    await c.fiatCancel("p1", "mc-maker-checker-1");
+    const [, opts] = fn.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
+    expect(opts.headers["Idempotency-Key"]).toBe("mc-maker-checker-1");
+    const fn2 = mockFetchOnce(200, { paymentId: "p1", state: "refunded", sandbox: true });
+    await c.fiatRefund("p1", undefined, "mc-maker-checker-2");
+    const [, opts2] = fn2.mock.calls[0] as unknown as [string, RequestInit & { headers: Record<string, string> }];
+    expect(opts2.headers["Idempotency-Key"]).toBe("mc-maker-checker-2");
+    const fn3 = mockFetchOnce(200, { runId: "rec-1", sandbox: true });
+    await c.reconcileRun();
+    expect((fn3.mock.calls[0] as unknown as [string])[0]).toBe("http://m/api/reconcile/runs");
+    const fn4 = mockFetchOnce(200, { postTo: "/api/webhooks/stripe", sandbox: true });
+    await c.webhookTest();
+    expect((fn4.mock.calls[0] as unknown as [string])[0]).toBe("http://m/api/webhooks/stripe/test");
+  });
+});
+
+describe("client-side validation (fail fast, no junk over the wire)", () => {
+  it("rejects bad amounts, addresses, hashes, chains without fetch", () => {
+    expect(() => assertMinorUnits("10.00")).toThrow(/minor-units/);
+    expect(() => assertMinorUnits("abc")).toThrow();
+    assertMinorUnits("1000");
+    expect(() => assertEvmAddress("tb1qwrong")).toThrow(/0x/);
+    assertEvmAddress(`0x${"ab".repeat(20)}`);
+    expect(() => assertTxHash("0xshort")).toThrow();
+    assertTxHash(`0x${"11".repeat(32)}`);
+    expect(() => assertChainId(1)).toThrow(/MAINNET_REFUSED/);
+    expect(() => assertChainId(137)).toThrow(/UNSUPPORTED_CHAIN/);
+    assertChainId(11155111);
+  });
+  it("evmRequest validates before sending (spy fetch never called)", async () => {
+    const fn = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fn);
+    const c = new ModalBackendClient({ baseUrl: "http://m", tenantId: "t" });
+    await expect(c.evmRequest({ to: "bad", valueWei: "1" }, "k")).rejects.toThrow();
+    await expect(c.fiatCreate({ amountMinor: "1.5", instructionId: "a" }, "k")).rejects.toThrow(/minor-units/);
+    expect(fn).not.toHaveBeenCalled();
+  });
+  it("resolveBaseUrl rejects javascript: URLs but allows same-origin paths", () => {
+    expect(() => resolveBaseUrl("javascript:alert(1)")).toThrow(/Invalid backend URL/);
+    expect(resolveBaseUrl("/api")).toBe("/api");
   });
 });

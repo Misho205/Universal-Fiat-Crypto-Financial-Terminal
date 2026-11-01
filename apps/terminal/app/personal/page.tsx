@@ -7,6 +7,7 @@ import AssistantPanel from "../../src/AssistantPanel";
 import DashboardPanel from "../../src/DashboardPanel";
 import { Shell } from "../../src/components/shell";
 import { useSession } from "../../src/components/session";
+import { usePolling, TERMINAL_STATES } from "../../src/lib/polling";
 import { Alert, EmptyState } from "../../src/components/ui/feedback";
 import { Button } from "../../src/components/ui/button";
 import { Card, CardTitle } from "../../src/components/ui/card";
@@ -19,19 +20,16 @@ import { FIAT_CURRENCIES } from "../../src/currencies";
 type View = "dash" | "send" | "receive" | "program" | "assistant" | "history" | "settings";
 
 export default function PersonalPage() {
-  const [locale, setLocale] = React.useState<"bg" | "en">("bg");
+  const [locale] = React.useState<"bg" | "en">("en");
   const s = useSession();
   const [view, setView] = React.useState<View>("dash");
-  const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
+  const t = (bg: string, en: string) => en;
 
   return (
     <Shell locale={locale} role={s.role}>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="flex items-center gap-2 text-2xl font-extrabold"><User aria-hidden /> {t("Личен портфейл", "Personal Wallet")}</h1>
         <span className="rounded-full bg-[rgb(var(--info-bg))] px-2.5 py-0.5 text-xs font-bold text-[rgb(var(--info))]">SANDBOX</span>
-        <button onClick={() => setLocale(locale === "bg" ? "en" : "bg")} className="ml-auto rounded-full border border-line px-3 py-1 text-sm font-semibold">
-          {locale === "bg" ? "EN" : "БГ"}
-        </button>
       </div>
       <p className="muted mb-2">{t("Плащайте и следете вашата активност — само вашите данни, без реални пари.", "Pay and track your activity — only your data, no real money.")}</p>
 
@@ -114,8 +112,23 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
   const [addr, setAddr] = React.useState("bcrt1qdemo000000000000000000000000000000000");
   const [out, setOut] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
-  const steps = [t("1 Получател", "1 Recipient"), t("2 Метод", "2 Method"), t("3 Сума", "3 Amount"), t("4 Преглед", "4 Review"), t("5 Статус", "5 Status")];
+  const t = (bg: string, en: string) => en;
+  const steps = ["1 Recipient", "2 Method", "3 Amount", "4 Review", "5 Status"];
+
+  function fieldError(): string {
+    if (step === 0 && !to.trim()) return "Recipient is required.";
+    if (step === 2) {
+      if (!/^\d+$/.test(amt) || amt.length > 16) return "Amount must be an integer in minor units (e.g. 1000).";
+      if (method === "crypto" && !addr.startsWith("bcrt1")) return "Address must be a BTC regtest address (bcrt1…).";
+    }
+    return "";
+  }
+  function next() {
+    const e = fieldError();
+    if (e) { setOut(e); return; }
+    setOut("");
+    setStep(step + 1);
+  }
 
   async function confirm() {
     setBusy(true); setOut("");
@@ -125,10 +138,10 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
         const c = await modal.fiatCreate({ amountMinor: amt, instructionId: `send-${Date.now()}`, currency: ccy }, key);
         const pid = (c.data as { paymentId: string }).paymentId;
         const cf = await modal.fiatConfirm(pid);
-        setOut(`${t("Готово", "Done")}: ${pid} → ${(cf.data as { state: string }).state} · ${amt} minor ${ccy} → ${to}`);
+        setOut(`Done: ${pid} → ${(cf.data as { state: string }).state} · ${amt} minor ${ccy} → ${to}`);
       } else {
         const c = await modal.cryptoSimulate({ amountMinor: amt, instructionId: `send-${Date.now()}`, address: addr }, key);
-        setOut(`${t("Готово", "Done")}: ${JSON.stringify((c.data as { transactionId: string; state: string }))}`);
+        setOut(`Done: ${JSON.stringify((c.data as { transactionId: string; state: string }))}`);
       }
       setStep(4);
     } catch (e) { setOut(friendlyError(e, locale)); }
@@ -137,45 +150,46 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
 
   return (
     <Card>
-      <CardTitle>{t("Изпрати плащане (testnet/sandbox)", "Send payment (testnet/sandbox)")}</CardTitle>
-      <ol className="mb-3 flex flex-wrap gap-2" aria-label={t("Стъпки", "Steps")}>
+      <CardTitle>Send payment (testnet/sandbox)</CardTitle>
+      <ol className="mb-3 flex flex-wrap gap-2" aria-label="Steps">
         {steps.map((s, i) => (
           <li key={s} aria-current={i === step ? "step" : undefined}
             className={`rounded-full px-3 py-1 text-xs font-bold ${i === step ? "bg-brand-900 text-white dark:bg-brand-100" : "border border-line"}`}>{s}</li>
         ))}
       </ol>
-      {step === 0 && <Field label={t("Получател (име или етикет)", "Recipient (name or label)")}><Input value={to} onChange={(e) => setTo(e.target.value)} autoComplete="off" /></Field>}
+      {step === 0 && <Field label="Recipient (name or label)" error={!to.trim() && out ? out : ""}><Input value={to} onChange={(e) => { setTo(e.target.value); setOut(""); }} autoComplete="off" /></Field>}
       {step === 1 && (
-        <Field label={t("Метод", "Method")}>
+        <Field label="Method">
           <Select value={method} onChange={(e) => setMethod(e.target.value as "fiat" | "crypto")}>
-            <option value="fiat">{t("Фиат (пясъчник)", "Fiat (sandbox)")}</option>
-            <option value="crypto">{t("Крипто testnet (BTC regtest)", "Crypto testnet (BTC regtest)")}</option>
+            <option value="fiat">Fiat (sandbox)</option>
+            <option value="crypto">Crypto testnet (BTC regtest)</option>
           </Select>
         </Field>
       )}
       {step === 2 && (<>
         {method === "fiat" ? (<>
-          <Field label={t("Валута", "Currency")}><Select value={ccy} onChange={(e) => setCcy(e.target.value)}>
-            {FIAT_CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {locale === "bg" ? c.nameBg : c.nameEn}</option>)}
+          <Field label="Currency"><Select value={ccy} onChange={(e) => setCcy(e.target.value)}>
+            {FIAT_CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.nameEn}</option>)}
           </Select></Field>
-          <Field label={t("Сума (minor units, напр. 1000 = €10.00)", "Amount (minor units, e.g. 1000 = €10.00)")}><Input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="numeric" /></Field>
+          <Field label="Amount (minor units, e.g. 1000 = €10.00)" error={fieldError()}><Input value={amt} onChange={(e) => { setAmt(e.target.value); setOut(""); }} inputMode="numeric" /></Field>
         </>) : (<>
-          <Field label={t("Сума (sats)", "Amount (sats)")}><Input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="numeric" /></Field>
-          <Field label={t("Адрес (само bcrt1… regtest)", "Address (bcrt1… regtest only)")}><Input value={addr} onChange={(e) => setAddr(e.target.value)} /></Field>
+          <Field label="Amount (sats)" error={fieldError()}><Input value={amt} onChange={(e) => { setAmt(e.target.value); setOut(""); }} inputMode="numeric" /></Field>
+          <Field label="Address (bcrt1… regtest only)" error={fieldError()}><Input value={addr} onChange={(e) => { setAddr(e.target.value); setOut(""); }} /></Field>
         </>)}
       </>)}
       {step === 3 && (
         <Alert tone="info">
-          {t("Проверете преди потвърждение", "Check before confirming")}: {amt} {method === "fiat" ? ccy : "sats"}
-          {t(" към ", " to ")}{method === "fiat" ? to : addr}. {t("Такси: по споразумението. Мрежа: sandbox/testnet. Без реални пари.", "Fees: per agreement. Network: sandbox/testnet. No real money.")}
+          Check before confirming: {amt} {method === "fiat" ? ccy : "sats"}
+          {" to "}{method === "fiat" ? to : addr}. Fees: per agreement. Network: sandbox/testnet. No real money.
         </Alert>
       )}
-      {step === 4 && <div role="status">{out ? <pre className="ok">{out}</pre> : <p className="muted">{t("Натиснете „Потвърди и изпрати“.", "Press “Confirm & send”.")}</p>}</div>}
+      {step === 4 && <div role="status">{out ? <pre className="ok">{out}</pre> : <p className="muted">Press “Confirm & send”.</p>}</div>}
+      {step < 3 && out && <div className="mt-2"><Alert tone="danger">{out}</Alert></div>}
       <div className="mt-3 flex gap-2">
-        {step > 0 && step < 4 && <Button variant="secondary" onClick={() => setStep(step - 1)}>{t("Назад", "Back")}</Button>}
-        {step < 3 && <Button onClick={() => setStep(step + 1)}>{t("Напред", "Next")}</Button>}
-        {step === 3 && <Button disabled={busy} onClick={confirm}>{busy ? t("Изпраща…", "Sending…") : t("Потвърди и изпрати", "Confirm & send")}</Button>}
-        {step === 4 && <Button variant="secondary" onClick={() => { setStep(0); setOut(""); }}>{t("Ново плащане", "New payment")}</Button>}
+        {step > 0 && step < 4 && <Button variant="secondary" onClick={() => setStep(step - 1)}>Back</Button>}
+        {step < 3 && <Button onClick={next}>Next</Button>}
+        {step === 3 && <Button disabled={busy} onClick={confirm}>{busy ? "Sending…" : "Confirm & send"}</Button>}
+        {step === 4 && <Button variant="secondary" onClick={() => { setStep(0); setOut(""); }}>New payment</Button>}
       </div>
     </Card>
   );
@@ -183,11 +197,11 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
 
 /* ---------- 3. Receive ---------- */
 function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "bg" | "en" }) {
-  const [to, setTo] = React.useState("bcrt1qdemo000000000000000000000000000000000");
+  const [to, setTo] = React.useState("0x0000000000000000000000000000000000000000");
   const [out, setOut] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [st, setSt] = React.useState("");
   const [pid, setPid] = React.useState("");
+  const [auto, setAuto] = React.useState(false);
   const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
   async function create() {
     setBusy(true); setOut("");
@@ -203,10 +217,15 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
     if (!pid) return;
     try {
       const r = await modal.evmStatus(pid);
-      const d = r.data as { state: string; confirmations: number; confirmationsRequired: number; txHash: string; explorer: string | null };
-      setSt(`${d.state} ${d.confirmations}/${d.confirmationsRequired} · ${d.txHash || t("чака подпис в портфейла", "awaiting wallet signature")}${d.explorer ? `\n${d.explorer}` : ""}`);
-    } catch (e) { setSt(friendlyError(e, locale)); }
+      const d = r.data as { state: string; confirmations: number; confirmationsRequired: number; txHash: string; explorer: string | null; note: string };
+      setOut(`${d.state} ${d.confirmations}/${d.confirmationsRequired} · ${d.txHash || t("чака подпис в портфейла", "awaiting wallet signature")}${d.explorer ? `\n${d.explorer}` : ""}\n${d.note ?? ""}`);
+    } catch (e) { setOut(friendlyError(e, locale)); }
   }
+  const live = usePolling(async () => {
+    if (!pid) return null;
+    const r = await modal.evmStatus(pid);
+    return r.data as { state: string; confirmations: number; confirmationsRequired: number; txHash: string; explorer: string | null };
+  }, { enabled: !!pid && auto, isTerminal: (v) => !!v && TERMINAL_STATES.evm.has(v.state) });
   return (
     <Card>
       <CardTitle>{t("Получи плащане (Sepolia заявка)", "Receive payment (Sepolia request)")}</CardTitle>
@@ -215,9 +234,19 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
       <div className="flex gap-2">
         <Button disabled={busy} onClick={create}>{t("Създай заявка", "Create request")}</Button>
         <Button variant="secondary" disabled={!pid} onClick={track}>{t("Проследи", "Track")}</Button>
+        <label className="flex items-center gap-1 text-sm">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!pid} />
+          {t("живо", "live")}
+        </label>
       </div>
+      {live.data && (
+        <div role="status" aria-live="polite" className="ok mt-2">
+          {live.data.state} {live.data.confirmations}/{live.data.confirmationsRequired}
+          {live.data.explorer && <> · <a className="underline" href={live.data.explorer} target="_blank" rel="noreferrer">explorer</a></>}
+        </div>
+      )}
+      {live.error && <p className="mt-1 text-sm text-[rgb(var(--danger))]">{live.error} <button className="underline" onClick={live.reset}>{t("Опитай отново", "Retry")}</button></p>}
       {out && <pre className="ok mt-2">{out}</pre>}
-      {st && <pre className="ok mt-2">{st}</pre>}
       <p className="muted mt-2 text-xs">{t("Фиат заявките не са налични като backend примитив (виж пропуските) — ползвайте EVM заявка или QR касата.", "Fiat requests are not a backend primitive (see gaps) — use an EVM request or the QR checkout.")}</p>
     </Card>
   );
@@ -299,16 +328,21 @@ function ProgramWizard({ modal, locale }: { modal: ModalBackendClient; locale: "
 function HistoryPanel({ modal, locale }: { modal: ModalBackendClient; locale: "bg" | "en" }) {
   const [q, setQ] = React.useState("");
   const [kind, setKind] = React.useState("all");
+  const [page, setPage] = React.useState(0);
+  const PAGE_SIZE = 20;
   const [items, setItems] = React.useState<{ kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }[]>([]);
+  const [total, setTotal] = React.useState(0);
   const [detail, setDetail] = React.useState("");
-  const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
-  async function search() {
+  const t = (bg: string, en: string) => en;
+  async function search(nextPage = page) {
     try {
-      const r = await modal.dashboardRecent({ kind, q: q || undefined, limit: 50 });
-      setItems((r.data as { items: typeof items }).items);
+      const r = await modal.dashboardRecent({ kind, q: q || undefined, limit: PAGE_SIZE, offset: nextPage * PAGE_SIZE });
+      const d = r.data as { items: typeof items; pagination?: { total: number } };
+      setItems(d.items);
+      setTotal(d.pagination?.total ?? d.items.length);
     } catch (e) { setDetail(friendlyError(e, locale)); }
   }
-  React.useEffect(() => { search(); }, []);
+  React.useEffect(() => { search(0); }, []);
   function download(item: (typeof items)[number]) {
     const blob = new Blob([JSON.stringify({ ...item, sandbox: true, exportedAt: new Date().toISOString() }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -324,8 +358,13 @@ function HistoryPanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
         <Select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="kind">
           {["all", "fiat", "evm", "agreement"].map((k) => <option key={k} value={k}>{k}</option>)}
         </Select>
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("търси по id/ref…", "search by id/ref…")} aria-label="search" />
-        <Button variant="secondary" onClick={search}>{t("Търси", "Search")}</Button>
+        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="search by id/ref…" aria-label="search" />
+        <Button variant="secondary" onClick={() => { setPage(0); search(0); }}>Search</Button>
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+        <Button size="sm" variant="secondary" disabled={page === 0} onClick={() => { const p = Math.max(0, page - 1); setPage(p); search(p); }}>← Prev</Button>
+        <span className="text-xs text-muted">Page {page + 1}{total ? ` · ${total} records` : ""}</span>
+        <Button size="sm" variant="secondary" disabled={items.length < PAGE_SIZE} onClick={() => { const p = page + 1; setPage(p); search(p); }}>Next →</Button>
       </div>
       {items.length === 0 && <p className="muted">{t("Няма резултати — направете плащане от таба Изпрати.", "No results — make a payment from the Send tab.")}</p>}
       <ul className="space-y-2">

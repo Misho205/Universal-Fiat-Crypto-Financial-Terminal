@@ -2,9 +2,20 @@
 // - HybridPayClient: NestJS apps/api (orders/checkout/instructions) — system of record.
 // - ModalBackendClient: Modal FastAPI sandbox (fiat/crypto simulate, contract validate,
 //   tx status, advisory AI) — stateless executor + AI helper.
+// Types mirror modal_backend/openapi.snapshot.json — see ./modal-schema.ts.
 // Base URLs come from env (NEXT_PUBLIC_*), never hardcoded. Token is a *public*
 // sandbox bearer (dev-shared-token) or user session token — NEVER a provider secret
 // or Meta API key (those stay server-side in Modal Secrets).
+import type {
+  AdvisoryEnvelope, AiAssistantBody, AiStateBody, AiUsage, CryptoSimulateBody, DashboardItem,
+  DashboardSummary, EvmPayment, EvmRequestBody, FiatCreateBody, FiatPayment,
+  FiatSimulateBody, HealthInfo, MeInfo, PagAgreement, TxStatus,
+} from "./modal-schema.js";
+export type {
+  AdvisoryEnvelope, AiAssistantBody, AiStateBody, AiUsage, CryptoSimulateBody, DashboardItem,
+  DashboardSummary, EvmPayment, EvmRequestBody, FiatCreateBody, FiatPayment,
+  FiatSimulateBody, HealthInfo, MeInfo, PagAgreement, TxStatus,
+};
 
 export interface ApiClientOpts { baseUrl: string; token?: string; tenantId: string; }
 
@@ -33,7 +44,32 @@ function baseUrlFromEnv(fallback = ""): string {
 }
 
 export function resolveBaseUrl(explicit?: string, fallback = "http://localhost:8000"): string {
-  return (explicit && explicit.trim()) || baseUrlFromEnv(fallback) || fallback;
+  const raw = (explicit && explicit.trim()) || baseUrlFromEnv(fallback) || fallback;
+  if (raw !== "" && !/^https?:\/\//.test(raw) && !raw.startsWith("/")) {
+    throw new ApiError(400, `Invalid backend URL (must be http(s) or same-origin path): ${raw.slice(0, 80)}`);
+  }
+  return raw;
+}
+
+/** Client-side request validation: fail fast with friendly errors, never send junk. */
+export function assertMinorUnits(value: string, field = "amountMinor"): void {
+  if (!/^\d+$/.test(value) || value.length > 16) {
+    throw new ApiError(400, `${field} must be an integer minor-units string (e.g. "1000"), got ${JSON.stringify(value).slice(0, 40)}`);
+  }
+}
+export function assertEvmAddress(addr: string): void {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    throw new ApiError(400, `Invalid EVM address (expected 0x + 40 hex): ${addr.slice(0, 20)}…`);
+  }
+}
+export function assertTxHash(hash: string): void {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
+    throw new ApiError(400, "Invalid transaction hash (expected 0x + 64 hex).");
+  }
+}
+export function assertChainId(chainId: number): void {
+  if (chainId === 1) throw new ApiError(422, "MAINNET_REFUSED: hackathon build supports Sepolia testnet only");
+  if (chainId !== 11155111) throw new ApiError(422, `UNSUPPORTED_CHAIN: expected 11155111, got ${chainId}`);
 }
 
 export class HybridPayClient {
@@ -59,11 +95,7 @@ export class HybridPayClient {
   }
 }
 
-// ---------- Modal sandbox backend ----------
-
-export interface FiatSimulateBody { amountMinor: string; instructionId: string; currency?: string; }
-export interface CryptoSimulateBody { amountMinor: string; instructionId: string; address: string; }
-export interface TxStatus { transactionId: string; state: string; providerRef?: string; sandbox: boolean; }
+// ---------- Modal sandbox backend (shapes in ./modal-schema.ts) ----------
 
 export class ModalBackendClient {
   readonly baseUrl: string;
@@ -96,76 +128,122 @@ export class ModalBackendClient {
     }
     return { status: r.status, data };
   }
-  health() {
-    return this.request<{ ok: boolean; liveMode: string; sandbox: boolean }>("/health", { headers: this.headers() });
-  }
-  fiatSimulate(body: FiatSimulateBody, idempotencyKey: string) {
+  async fiatSimulate(body: FiatSimulateBody, idempotencyKey: string) {
+    assertMinorUnits(body.amountMinor);
     return this.request<TxStatus>("/api/payments/fiat/simulate", {
       method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),
     });
   }
   // --- Fiat sandbox payments (authoritative provider status, TEST mode only) ---
-  fiatCreate(body: FiatSimulateBody, idempotencyKey: string) {
-    return this.request<TxStatus & { paymentId: string; provider?: string; clientSecret?: string }>(
+  async fiatCreate(body: FiatCreateBody, idempotencyKey: string) {
+    assertMinorUnits(body.amountMinor);
+    return this.request<FiatPayment>(
       "/api/payments/fiat", {
         method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),
       });
   }
   fiatConfirm(paymentId: string) {
-    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/confirm`, {
+    return this.request<FiatPayment>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/confirm`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({}),
     });
   }
   fiatGet(paymentId: string) {
-    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}`, {
+    return this.request<FiatPayment>(`/api/payments/fiat/${encodeURIComponent(paymentId)}`, {
       headers: this.headers(),
     });
   }
-  fiatList() {
-    return this.request<{ payments: TxStatus[]; sandbox: boolean }>("/api/payments/fiat", { headers: this.headers() });
+  fiatList(params: { limit?: number; offset?: number; state?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.offset !== undefined) q.set("offset", String(params.offset));
+    if (params.state) q.set("state", params.state);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request<{ payments: FiatPayment[]; sandbox: boolean; pagination?: { limit: number; offset: number; state: string } }>(`/api/payments/fiat${qs}`, { headers: this.headers() });
   }
-  fiatCancel(paymentId: string) {
-    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/cancel`, {
-      method: "POST", headers: this.headers(), body: JSON.stringify({}),
+  fiatCancel(paymentId: string, idempotencyKey?: string) {
+    return this.request<FiatPayment>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/cancel`, {
+      method: "POST", headers: this.headers(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), body: JSON.stringify({}),
     });
   }
-  fiatRefund(paymentId: string, amountMinor?: string) {
-    return this.request<TxStatus & { paymentId: string }>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/refund`, {
-      method: "POST", headers: this.headers(), body: JSON.stringify(amountMinor ? { amountMinor } : {}),
+  async fiatRefund(paymentId: string, amountMinor?: string, idempotencyKey?: string) {
+    if (amountMinor !== undefined) assertMinorUnits(amountMinor);
+    return this.request<FiatPayment>(`/api/payments/fiat/${encodeURIComponent(paymentId)}/refund`, {
+      method: "POST", headers: this.headers(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), body: JSON.stringify(amountMinor ? { amountMinor } : {}),
     });
+  }
+  reconcileRun() {
+    return this.request<{ runId: string; tenant: string; sandbox: boolean; unknownFiat: number; openEvm: number; note: string }>(
+      `/api/reconcile/runs`, { method: "POST", headers: this.headers(), body: JSON.stringify({}) });
+  }
+  async dashboardExportCsv(kind = "all") {
+    const qs = new URLSearchParams({ kind, format: "csv" }).toString();
+    const r = await fetch(`${this.baseUrl}/api/dashboard/export?${qs}`, { headers: this.headers() });
+    const text = await r.text();
+    if (!r.ok) throw new ApiError(r.status, text.slice(0, 200));
+    return { status: r.status, data: text };
+  }
+  webhookTest() {
+    return this.request<{ postTo: string; body: unknown; headers: Record<string, string>; note: string; sandbox: boolean }>(
+      `/api/webhooks/stripe/test`, { method: "POST", headers: this.headers(), body: JSON.stringify({}) });
   }
   // --- EVM Sepolia testnet (wallet signs; backend tracks + verifies, never holds keys) ---
-  evmRequest(body: { to: string; valueWei: string; chainId?: number; expiresInSec?: number }, idempotencyKey: string) {
-    return this.request<{ paymentId: string; chainId: number; to: string; valueWei: string; state: string; explorerBase: string; sandbox: boolean }>(
+  async evmRequest(body: EvmRequestBody, idempotencyKey: string) {
+    assertEvmAddress(body.to);
+    assertMinorUnits(body.valueWei, "valueWei");
+    assertChainId(body.chainId ?? 11155111);
+    return this.request<EvmPayment & { explorerBase: string }>(
       "/api/payments/evm/request", {
         method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify({ chainId: 11155111, ...body }),
       });
   }
-  evmSubmit(paymentId: string, txHash: string) {
-    return this.request<{ paymentId: string; state: string; txHash: string; explorer: string; sandbox: boolean }>(
+  async   evmSubmit(paymentId: string, txHash: string) {
+    assertTxHash(txHash);
+    return this.request<EvmPayment & { explorer: string }>(
       `/api/payments/evm/${encodeURIComponent(paymentId)}/submit`, {
         method: "POST", headers: this.headers(), body: JSON.stringify({ txHash }),
       });
   }
+  evmReplace(paymentId: string, newTxHash: string) {
+    assertTxHash(newTxHash);
+    return this.request<EvmPayment>(
+      `/api/payments/evm/${encodeURIComponent(paymentId)}/replace`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify({ newTxHash }),
+      });
+  }
   evmStatus(paymentId: string) {
-    return this.request<{ paymentId: string; state: string; txHash: string; confirmations: number; confirmationsRequired: number; explorer: string | null; businessSettled: boolean; note: string; sandbox: boolean }>(
+    return this.request<EvmPayment>(
       `/api/payments/evm/${encodeURIComponent(paymentId)}`, { headers: this.headers() });
   }
-  evmList() {
-    return this.request<{ payments: { id: string; chainId: number; to: string; valueWei: string; state: string; txHash: string; confirmations: number; explorer: string | null }[]; chainId: number; sandbox: boolean }>(
-      "/api/payments/evm", { headers: this.headers() });
+  evmList(params: { limit?: number; offset?: number; state?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.offset !== undefined) q.set("offset", String(params.offset));
+    if (params.state) q.set("state", params.state);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request<{ payments: EvmPayment[]; chainId: number; sandbox: boolean; pagination?: { limit: number; offset: number; state: string } }>(
+      `/api/payments/evm${qs}`, { headers: this.headers() });
   }
   // --- programmable fiat agreements (deterministic, sandbox; never escrow) ---
-  pagCreate(terms: unknown, creator: string, idempotencyKey: string) {
-    return this.request<{ agreementId: string; version: number; state: string; disclosure: string; sandbox: boolean }>(
+  async pagCreate(terms: unknown, creator: string, idempotencyKey: string) {
+    if (!creator.trim()) throw new ApiError(400, "creator is required");
+    return this.request<PagAgreement>(
       "/api/contracts/programmable", {
         method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }),
         body: JSON.stringify({ terms, creator }),
       });
   }
   pagGet(agreementId: string) {
-    return this.request<{ agreementId: string; state: string; terms: unknown; evidence: unknown; conditionStatuses: Record<string, string>; eligible: boolean; chainValid: boolean; history: unknown[]; disclosure: string; sandbox: boolean }>(
+    return this.request<PagAgreement>(
       `/api/contracts/programmable/${encodeURIComponent(agreementId)}`, { headers: this.headers() });
+  }
+  pagList(params: { limit?: number; offset?: number; state?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.offset !== undefined) q.set("offset", String(params.offset));
+    if (params.state) q.set("state", params.state);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request<{ agreements: PagAgreement[]; sandbox: boolean; pagination?: { limit: number; offset: number; state: string } }>(
+      `/api/contracts/programmable${qs}`, { headers: this.headers() });
   }
   pagActivate(agreementId: string, actor: string, role: string) {
     return this.request(`/api/contracts/programmable/${encodeURIComponent(agreementId)}/activate`, {
@@ -188,7 +266,30 @@ export class ModalBackendClient {
       body: JSON.stringify({ actor, role: "executor" }),
     });
   }
-  cryptoSimulate(body: CryptoSimulateBody, idempotencyKey: string) {
+  pagCancel(agreementId: string, actor: string, role: string) {
+    if (!actor.trim()) throw new ApiError(400, "cancel requires an actor");
+    return this.request<PagAgreement>(
+      `/api/contracts/programmable/${encodeURIComponent(agreementId)}/cancel`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify({ actor, role }),
+      });
+  }
+  pagDispute(agreementId: string, actor: string) {
+    if (!actor.trim()) throw new ApiError(400, "dispute requires an actor");
+    return this.request<PagAgreement>(
+      `/api/contracts/programmable/${encodeURIComponent(agreementId)}/dispute`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify({ actor, role: "party" }),
+      });
+  }
+  aiAnalyze(order: Record<string, string>, text = "") {
+    return this.request<AdvisoryEnvelope<{ suggestion: string; model?: string }>>(`/api/ai/analyze`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ order, text }),
+    });
+  }
+  async cryptoSimulate(body: CryptoSimulateBody, idempotencyKey: string) {
+    assertMinorUnits(body.amountMinor);
+    if (!body.address.startsWith("bcrt1")) {
+      throw new ApiError(422, "wrong-network or bad regtest address (expected bcrt1…)");
+    }
     return this.request<TxStatus>("/api/payments/crypto/simulate", {
       method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }), body: JSON.stringify(body),
     });
@@ -207,53 +308,58 @@ export class ModalBackendClient {
     });
   }
   aiFraud(transaction: unknown) {
-    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: { riskLevel: string; scoreBps: number; indicators: { code: string; detail: string; weightBps?: number }[] }; notice: string }>(`/api/ai/fraud-signals`, {
+    return this.request<AdvisoryEnvelope<{ riskLevel: string; scoreBps: number; indicators: { code: string; detail: string; weightBps?: number }[] }>>(`/api/ai/fraud-signals`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ transaction }),
     });
   }
   aiRouting(context: unknown) {
-    return this.request<{ advisoryOnly: boolean; recommendation: string }>(`/api/ai/routing-recommendation`, {
+    return this.request<AdvisoryEnvelope<{ recommendedRoute: string; alternatives: string[]; rationale: string; warnings: string[] }>>(`/api/ai/routing-recommendation`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ context }),
     });
   }
   aiContract(terms: unknown) {
-    return this.request<{ advisoryOnly: boolean; summary: string }>(`/api/ai/contract-analysis`, {
+    return this.request<AdvisoryEnvelope<{ conditionsStatus: unknown[]; gaps: string[]; recommendation: string }>>(`/api/ai/contract-analysis`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ terms }),
     });
   }
   aiExplainCrypto(transaction: unknown) {
-    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: unknown; notice: string }>(`/api/ai/explain-crypto`, {
+    return this.request<AdvisoryEnvelope<{ summary: string; chain?: string; explorerLink?: string; settlementNote?: string; [k: string]: unknown }>>(`/api/ai/explain-crypto`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ transaction }),
     });
   }
-  aiExplainState(snapshot: { state: string; reasons?: string[]; conditionStatuses?: Record<string, string> }) {
-    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: unknown; notice: string }>(`/api/ai/explain-state`, {
+  async aiExplainState(snapshot: AiStateBody) {
+    if (!snapshot.state) throw new ApiError(400, "explain-state requires a state");
+    return this.request<AdvisoryEnvelope<{ state: string; headline: string; reasons: string[]; nextSteps: string[] }>>(`/api/ai/explain-state`, {
       method: "POST", headers: this.headers(), body: JSON.stringify(snapshot),
     });
   }
-  aiAssistant(message: string, context: unknown = {}) {
-    return this.request<{ advisoryOnly: boolean; validated: boolean; kind: string; data: { answer: string; topic: string; actions: string[]; needsHuman: boolean }; notice: string }>(`/api/ai/assistant`, {
+  async aiAssistant(message: string, context: AiAssistantBody["context"] = {}) {
+    if (!message.trim()) throw new ApiError(400, "assistant message must not be empty");
+    return this.request<AdvisoryEnvelope<{ answer: string; topic: string; actions: string[]; needsHuman: boolean }>>(`/api/ai/assistant`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ message, context }),
     });
   }
   aiUsage() {
-    return this.request<{ calls: number; fallbacks: number; promptTokens: number; completionTokens: number; sandbox: boolean }>(`/api/ai/usage`, {
+    return this.request<AiUsage>(`/api/ai/usage`, {
       headers: this.headers(),
     });
   }
   me() {
-    return this.request<{ role: string; sandbox: boolean; liveMode: string }>(`/api/me`, {
+    return this.request<MeInfo>(`/api/me`, {
       headers: this.headers(),
     });
+  }
+  health() {
+    return this.request<HealthInfo>("/health", { headers: this.headers() });
   }
   dashboardSummary() {
-    return this.request<{ tenant: string; sandbox: boolean; fiat: { total: number; byState: Record<string, number> }; evm: { total: number; byState: Record<string, number>; chainId: number }; agreements: { total: number; byState: Record<string, number> } }>(`/api/dashboard/summary`, {
+    return this.request<DashboardSummary>(`/api/dashboard/summary`, {
       headers: this.headers(),
     });
   }
-  dashboardRecent(params: { kind?: string; state?: string; q?: string; limit?: number } = {}) {
-    const qs = new URLSearchParams({ kind: params.kind ?? "all", ...(params.state ? { state: params.state } : {}), ...(params.q ? { q: params.q } : {}), limit: String(params.limit ?? 50) }).toString();
-    return this.request<{ items: { kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }[]; sandbox: boolean }>(`/api/dashboard/recent?${qs}`, {
+  dashboardRecent(params: { kind?: string; state?: string; q?: string; limit?: number; offset?: number } = {}) {
+    const qs = new URLSearchParams({ kind: params.kind ?? "all", ...(params.state ? { state: params.state } : {}), ...(params.q ? { q: params.q } : {}), limit: String(params.limit ?? 50), offset: String(params.offset ?? 0) }).toString();
+    return this.request<{ items: DashboardItem[]; sandbox: boolean; pagination?: { limit: number; offset: number; total: number } }>(`/api/dashboard/recent?${qs}`, {
       headers: this.headers(),
     });
   }

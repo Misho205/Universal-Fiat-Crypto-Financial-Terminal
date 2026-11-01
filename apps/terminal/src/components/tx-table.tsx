@@ -2,11 +2,14 @@
 import * as React from "react";
 import { ModalBackendClient, friendlyError } from "@hybridpay/sdk";
 import { ConfirmDialog } from "./ui/dialog";
-import { StatusBadge } from "./ui/badge";
+import { StatusBadge, SandboxBadge } from "./ui/badge";
 import { Alert } from "./ui/feedback";
 import { TableWrap, Td, Th } from "./ui/table";
 
-export interface TxItem { kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null }
+export interface TxItem {
+  kind: string; id: string; state: string; detail: string; ref: string; explorer?: string | null;
+  provider?: string; sandbox?: boolean; idempotencyKey?: string;
+}
 
 export function TxTable({ items, modal, isAdmin, locale, onChanged, onView }: {
   items: TxItem[]; modal: ModalBackendClient; isAdmin: boolean; locale: "bg" | "en";
@@ -39,7 +42,12 @@ export function TxTable({ items, modal, isAdmin, locale, onChanged, onView }: {
         <tbody>
           {items.map((i) => (
             <tr key={`${i.kind}:${i.id}`}>
-              <Td><code className="num">{i.id}</code>{i.explorer && <div><a className="text-xs underline" href={i.explorer} target="_blank" rel="noreferrer">explorer</a></div>}</Td>
+              <Td><code className="num">{i.id}</code>
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {i.provider && <span className="rounded bg-[rgb(var(--line))] px-1.5 py-0.5 text-[11px] font-semibold">{i.provider}</span>}
+              {i.sandbox !== false && <SandboxBadge />}
+            </div>
+            {i.explorer && <div><a className="text-xs underline" href={i.explorer} target="_blank" rel="noreferrer">explorer</a></div>}</Td>
               <Td>{i.kind}</Td>
               <Td><StatusBadge state={i.state} /></Td>
               <Td className="max-w-64 truncate" title={i.detail}>{i.detail}</Td>

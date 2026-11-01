@@ -22,10 +22,17 @@ _raw_origins = _get("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3
 ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 API_SHARED_TOKEN: str = _get("API_SHARED_TOKEN", "")
-# Admin token (sensitive operations: cancel/refund/dispute/execute). If empty,
-# admin endpoints fail closed for token holders (dev-caller bypass only when NO
+# Admin token (sensitive operations: cancel/refund/dispute/execute).
+# If empty, admin endpoints fail closed for token holders (dev-caller bypass only when NO
 # tokens are configured at all, i.e. bare local dev).
 API_ADMIN_TOKEN: str = _get("API_ADMIN_TOKEN", "")
+# Server-side token→tenant binding. When set, the tenant is DERIVED from the
+# authenticated token and any client-supplied X-Tenant-Id is ignored (never trusted
+# for authorization). Format: exact tenant id string. Unset = local-dev mode where
+# the header is accepted and the caller is marked dev/operator explicitly.
+# Example (Modal Secret): TENANT_FOR_SHARED_TOKEN=tenant-bank-a
+TENANT_FOR_SHARED_TOKEN: str = _get("TENANT_FOR_SHARED_TOKEN", "")
+TENANT_FOR_ADMIN_TOKEN: str = _get("TENANT_FOR_ADMIN_TOKEN", "")
 # Meta Model API key. Primary name per integration spec is MODEL_API_KEY;
 # META_MODEL_API_KEY is accepted as a legacy fallback. Never logged, never
 # sent to the frontend; injected via the `hybridpay-test` Modal Secret.

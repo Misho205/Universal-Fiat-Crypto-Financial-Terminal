@@ -29,7 +29,7 @@ const btnPrimary: React.CSSProperties = { background: "linear-gradient(135deg,#4
 const btnGhost: React.CSSProperties = { background: "#eef2ff", color: "#4338ca", border: "1px solid #c7d2fe", borderRadius: 10, padding: "10px 14px", fontWeight: 600, cursor: "pointer", marginRight: 8, marginTop: 8 };
 
 export default function Home() {
-  const [locale, setLocale] = useState<Locale>("bg");
+  const [locale] = useState<Locale>("en");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [tenant, setTenant] = useState("demo-tenant");
   // Session token lives in memory only (useState) — never localStorage/sessionStorage.
@@ -171,7 +171,6 @@ export default function Home() {
           </div>
           <div className="hero-side">
             <span className="live-badge">{t.liveOff}</span>
-            <button className="lang" onClick={() => setLocale(locale === "bg" ? "en" : "bg")}>{locale === "bg" ? "EN" : "БГ"}</button>
           </div>
         </div>
         <p className="sandbox">{t.sandboxNote}</p>

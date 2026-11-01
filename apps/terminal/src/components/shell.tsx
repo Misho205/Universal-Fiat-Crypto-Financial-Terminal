@@ -13,7 +13,7 @@ const NAV = [
   { href: "/simulator", labelEn: "Simulator", labelBg: "Симулатор", icon: FlaskConical },
 ];
 
-export function Shell({ children, locale = "bg", role = "—" }: { children: React.ReactNode; locale?: string; role?: string }) {
+export function Shell({ children, locale = "en", role = "—" }: { children: React.ReactNode; locale?: string; role?: string }) {
   const path = usePathname();
   return (
     <div className="min-h-screen bg-bg text-ink">
