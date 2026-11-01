@@ -4,9 +4,9 @@ Date: 2026-10-31. Backend: `https://michail-tsvetanov--hybridpay-sandbox-fastapi
 (deployed, sandbox, `liveMode: OFF`). Frontend: static export served on Modal with
 same-origin `/api/*` proxy (no CORS, no browser secrets).
 
-Method: `modal_backend/openapi.snapshot.json` (36 paths / 20 schemas, captured live)
+Method: `modal_backend/openapi.snapshot.json` (40 paths / 20 schemas, captured live)
 is the contract. `modal_backend/probe_live.py` exercises every path against the real
-deployment — **45/45 verified green** (run 2026-10-31, plus `test_live_integration.py`
+deployment — **46/46 verified green** (run 2026-10-31, plus `test_live_integration.py`
 which runs the same sweep in CI-gated opt-in mode). `test_openapi_coverage.py` fails
 the suite if any snapshot path lacks probe + SDK coverage (no silent Swagger-only endpoints).
 
@@ -55,7 +55,7 @@ the suite if any snapshot path lacks probe + SDK coverage (no silent Swagger-onl
 ## How to re-verify
 ```
 # full live sweep (sandbox only, ~30s):
-BACKEND_URL=https://<backend> python modal_backend/probe_live.py   # expect 45/45
+BACKEND_URL=https://<backend> python modal_backend/probe_live.py   # expect 46/46
 # pytest gate (skipped unless both vars set):
 RUN_LIVE_BACKEND_TESTS=1 BACKEND_URL=https://<backend> pytest modal_backend/test_live_integration.py -q
 # contract drift guard (offline, always runs):

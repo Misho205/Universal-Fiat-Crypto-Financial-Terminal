@@ -162,6 +162,8 @@ def main() -> int:
     check("GET /api/dashboard/export csv", s == 200, f"{s}")
     s, b = call("POST", "/api/webhooks/stripe/test", {})
     check("POST /api/webhooks/stripe/test", s == 200 and "stripe-signature" in b, f"{s}")
+    s, b = call("GET", "/api/admin/overview")
+    check("GET /api/admin/overview (admin-only)", s in (200, 401, 403), f"{s}")
 
     for path, payload in [
         ("/api/ai/analyze", {"order": {}, "text": "hi"}),

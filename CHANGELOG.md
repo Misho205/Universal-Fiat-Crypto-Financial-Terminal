@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased (local only — NOT deployed; deploy needs explicit approval)
+- English-only UI (all pages default `en`, toggles removed, `<html lang="en">`).
+- Banking Ops/Personal History pagination UI (Prev/Next + totals); server CSV download; reconcile sweep button.
+- Send wizard inline field errors; EvmPanel migrated to design-system primitives with validation.
+- Backend: idempotent cancel/refund (`Idempotency-Key`), `POST /api/reconcile/runs`, `GET /api/dashboard/export?format=csv`, `POST /api/webhooks/stripe/test`, per-tenant AI usage, `GET /api/admin/overview` (admin-only, no secret echo) + Admin UI wiring.
+- OpenAPI snapshot 40 paths; `probe_live.py` 46 checks; SDK `adminOverview/reconcileRun/dashboardExportCsv/webhookTest`.
+- Tests: backend 66 passed / 4 skipped (opt-in live), SDK 14, terminal 22 (incl. 11 static a11y-contract checks), `pnpm build` 9/9, full `pnpm test` 11/11.
+- In-process load probe (`test_load.py`): p95 3.6–8.2ms across hot paths (TestClient, seeded 200 fiat/50 evm/20 agreements; NOT network latency).
+- Docs: `docs/modal-deploy-checklist.md` refreshed (counts, crash-loop guards, staging tenant binding §3b); audit reports updated.
+
 ## 2026-10-31 — Permanent deploy (approved)
 - Backend: `modal deploy modal_backend/app.py` → stable public URL (health verified OFF/sandbox).
 - Frontend: `modal deploy modal_frontend.py` → stable public URL (all pages 200, proxy 201/200 verified).

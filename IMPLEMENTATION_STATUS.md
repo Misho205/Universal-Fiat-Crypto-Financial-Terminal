@@ -1,12 +1,17 @@
 # IMPLEMENTATION_STATUS.md — Universal Hybrid Payment Terminal
 
-Generated: 2026-10-31 (UTC). Scope: user-facing app + persistent data layer
-(dashboard, auth/RBAC, Postgres/Volume durability, migrations).
+Generated: 2026-10-31 (UTC); updated 2026-11-01 (UTC, commit a4a5dfa + working tree below).
+Scope: user-facing app + persistent data layer (dashboard, auth/RBAC, Postgres/Volume durability, migrations).
 Policy: no invented results — every claim below cites an executed command or a file.
 
-Deployed (approved 2026-10-31): backend
+Deployed (approved 2026-10-31, commit 9b5971b): backend
 `https://michail-tsvetanov--hybridpay-sandbox-fastapi-app.us-east.modal.run` and frontend
 `https://michail-tsvetanov--hybridpay-terminal-serve.us-east.modal.run` (verified 200/201 above).
+NOT deployed (local only, pending explicit approval): everything after 9b5971b —
+tenant binding, SDK validation + modal-schema, polling lib, probe_live 46 checks,
+pagination (backend + UI), English-only UI, idempotent cancel/refund, reconcile runs,
+server CSV export, webhook test-trigger, per-tenant AI usage, admin overview,
+a11y contract tests, load probe (see CHANGELOG + `git log --oneline`).
 
 ## 1. Modal startup failure — reproduction & fix
 - **Reproduce**: `modal serve modal_backend/app.py` — image builds (fastapi/httpx/pydantic/stripe/uvicorn),

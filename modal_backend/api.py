@@ -853,6 +853,32 @@ async def me(authorization: str | None = Header(default=None)) -> dict[str, Any]
             "liveMode": config.live_mode_status()}
 
 
+@app.get("/api/admin/overview")
+async def admin_overview(tenant: str = Depends(require_tenant),
+                         caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Admin-only operational overview. Derived from live config + store counts.
+
+    No secrets are ever echoed (only booleans). Seat/user invites remain out of
+    scope for the sandbox: access is bearer-based via the `hybridpay-test` Modal
+    Secret, so there is no user store to manage.
+    """
+    fiat = db_tx_list(tenant, limit=1000)
+    evm_items = _db.evm_list(tenant, limit=1000)
+    pags = _db.pag_list(tenant, limit=1000)
+    log_event(logger, "admin.overview", tenant=tenant, caller=caller)
+    return {"tenant": tenant, "sandbox": True,
+            "liveMode": config.live_mode_status(),
+            "rolesConfigured": {"operator": bool(config.API_SHARED_TOKEN),
+                                "admin": bool(config.API_ADMIN_TOKEN)},
+            "tenantBinding": {"shared": bool(config.TENANT_FOR_SHARED_TOKEN),
+                              "admin": bool(config.TENANT_FOR_ADMIN_TOKEN)},
+            "aiRateLimitPerMin": config.AI_RATE_LIMIT_PER_MIN,
+            "confirmationsRequired": config.EVM_CONFIRMATIONS_REQUIRED,
+            "totals": {"fiat": len(fiat), "evm": len(evm_items), "agreements": len(pags)},
+            "usersSeats": {"managed": False,
+                           "note": "Bearer-based access via Modal Secrets; no user/seat store in sandbox. Invites API out of scope."}}
+
+
 @app.get("/api/dashboard/summary")
 async def dashboard_summary(tenant: str = Depends(require_tenant),
                             caller: str = Depends(require_auth)) -> dict[str, Any]:

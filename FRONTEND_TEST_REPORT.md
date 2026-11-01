@@ -9,7 +9,7 @@ Date: 2026-11-01. Commands executed in this session (all green unless noted).
 
 ## 2. Backend tests
 
-- `API_SHARED_TOKEN=dev-shared-token API_ADMIN_TOKEN=dev-admin-token python -m pytest modal_backend/ -q` → **59 passed, 4 skipped** (skips: opt-in live RPC, Meta live, webhook-live variants). Includes new `test_pagination.py` (3), `test_tenant_binding.py` (2), `test_openapi_coverage.py` (4).
+- `API_SHARED_TOKEN=dev-shared-token API_ADMIN_TOKEN=dev-admin-token python -m pytest modal_backend/ -q` → **66 passed, 4 skipped** (skips: opt-in live Meta, live Sepolia RPC, live backend, legacy Meta live — all require keys/URLs). Includes `test_pagination.py` (3), `test_tenant_binding.py` (2), `test_openapi_coverage.py` (5), `test_admin_overview.py` (3), `test_load.py` (1), `test_report_gaps.py` (3).
 
 ## 3. Frontend/package tests
 
@@ -30,7 +30,7 @@ Server shut down after probe. Matches deployed-behavior contract (`IMPLEMENTATIO
 
 | # | Task | Evidence | Status |
 |---|---|---|---|
-| 1 | Inspect OpenAPI | `modal_backend/openapi.snapshot.json` (36 paths), `probe_live.py` | ✅ done |
+| 1 | Inspect OpenAPI | `modal_backend/openapi.snapshot.json` (40 paths), `probe_live.py` | ✅ done |
 | 2 | Typed client from schemas | `packages/sdk/src/modal-schema.ts` + `index.ts` (`ModalBackendClient`, 30+ methods) | ✅ done |
 | 3 | Backend URL via env | `NEXT_PUBLIC_MODAL_API_URL` / `NEXT_PUBLIC_API_URL`, `resolveBaseUrl` allowlist | ✅ done |
 | 4 | Connect both workspaces | Banking + Personal import `ModalBackendClient`, env-based base URLs | ✅ done |
@@ -41,7 +41,7 @@ Server shut down after probe. Matches deployed-behavior contract (`IMPLEMENTATIO
 | 9 | Safe status polling | `usePolling` backoff/abort/terminal-stop, used in Ops/EVM/Receive | ✅ done |
 | 10 | Meta Muse Spark AI endpoints | explain fiat/crypto/state, fraud, routing, contract, assistant + usage; validated/stub badges | ✅ done |
 | 11 | Programmable contracts endpoints | create/get/activate/approve/evidence/execute/cancel/dispute verified live | ✅ done |
-| 12 | Automated integration tests | `probe_live.py` 45/45 + `test_live_integration.py` (opt-in) + `test_openapi_coverage.py` guard | ✅ done |
+| 12 | Automated integration tests | `probe_live.py` 46/46 + `test_live_integration.py` (opt-in) + `test_openapi_coverage.py` guard | ✅ done |
 
 Constraints honored: no MODEL_API_KEY/provider secrets in browser (grep clean); tenant derived server-side when bound; no Swagger-only assumptions (coverage test fails otherwise); simulation vs provider-backed clearly separated (`mock` vs Stripe TEST label, regtest vs RPC); no mock substitution (coverage test bans `MOCK_TX_*`/fake-success); no production deploy by this audit.
 

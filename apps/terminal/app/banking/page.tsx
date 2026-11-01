@@ -386,9 +386,18 @@ function AdminView({ modal, tenant, role, isAdmin, onSign, onLogout, locale }: {
 }) {
   const [health, setHealth] = React.useState("");
   const [tok, setTok] = React.useState("");
+  const [ov, setOv] = React.useState<null | { rolesConfigured: { operator: boolean; admin: boolean }; tenantBinding: { shared: boolean; admin: boolean }; aiRateLimitPerMin: number; totals: { fiat: number; evm: number; agreements: number }; usersSeats: { note: string } }>(null);
+  const [ovErr, setOvErr] = React.useState("");
   React.useEffect(() => {
     modal.health().then((r) => setHealth(JSON.stringify(r.data)), (e) => setHealth(String(e)));
   }, [modal]);
+  React.useEffect(() => {
+    if (!isAdmin) { setOv(null); return; }
+    modal.adminOverview().then(
+      (r) => { setOv(r.data as typeof ov); setOvErr(""); },
+      (e) => { setOv(null); setOvErr(e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)); },
+    );
+  }, [modal, isAdmin]);
   const matrix: [string, string, string][] = [
     ["Read: dashboard, history, agreements, AI", "operator", "admin"],
     ["Create fiat/EVM payments, confirm, submit", "operator", "admin"],
@@ -417,17 +426,24 @@ function AdminView({ modal, tenant, role, isAdmin, onSign, onLogout, locale }: {
         </table>
       </Card>
       <Card>
-        <CardTitle>{locale === "bg" ? "Потребители и места" : "Users & seats"}</CardTitle>
-        <Alert tone="warn">{locale === "bg"
-          ? "Няма backend endpoint за потребители/места в sandbox build-а — управлението на достъп е чрез Modal Secrets (API_SHARED_TOKEN / API_ADMIN_TOKEN) и X-Tenant-Id. Заявен API: user invites + seat limits."
-          : "No users/seats endpoint in the sandbox backend — access is managed via Modal Secrets (API_SHARED_TOKEN / API_ADMIN_TOKEN) and X-Tenant-Id. Requested API: user invites + seat limits."}</Alert>
+        <CardTitle>Users & seats</CardTitle>
+        {ov ? (
+          <ul className="space-y-1 text-sm">
+            <li>Roles configured — operator: <code>{String(ov.rolesConfigured.operator)}</code>, admin: <code>{String(ov.rolesConfigured.admin)}</code></li>
+            <li>Tenant binding — shared: <code>{String(ov.tenantBinding.shared)}</code>, admin: <code>{String(ov.tenantBinding.admin)}</code></li>
+            <li>AI rate limit: <code>{ov.aiRateLimitPerMin}/min</code> · tracked records — fiat: <code>{ov.totals.fiat}</code>, evm: <code>{ov.totals.evm}</code>, agreements: <code>{ov.totals.agreements}</code></li>
+            <li className="muted">{ov.usersSeats.note}</li>
+          </ul>
+        ) : (
+          <Alert tone="warn">Admin overview unavailable{(ovErr ? `: ${ovErr}` : " (requires admin token)")}. Access is managed via Modal Secrets (API_SHARED_TOKEN / API_ADMIN_TOKEN) and X-Tenant-Id. Requested API: user invites + seat limits.</Alert>
+        )}
       </Card>
       <Card>
         <CardTitle>{locale === "bg" ? "API интеграция и сигурност" : "API integration & security"}</CardTitle>
         <ul className="list-disc space-y-1 pl-5 text-sm">
-          <li>Modal Secret: <code>hybridpay-test</code> (стойностите никога не излизат в браузъра)</li>
-          <li>Bearer в паметта; CORS allowlist; HMAC webhooks; rate limit {locale === "bg" ? "за AI" : "for AI"}</li>
-          <li>Live: <code>OFF</code> (fail-closed без approval файл + live ключове)</li>
+          <li>Modal Secret: <code>hybridpay-test</code> (values never enter the browser)</li>
+          <li>Bearer in memory; CORS allowlist; HMAC webhooks; AI rate limit</li>
+          <li>Live: <code>OFF</code> (fail-closed without approval file + live keys)</li>
           <li><Link className="underline" href="/design-system">{locale === "bg" ? "Дизайн система" : "Design system"}</Link> · <code>docs/modal-deploy-checklist.md</code></li>
         </ul>
       </Card>

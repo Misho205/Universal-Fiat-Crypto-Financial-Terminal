@@ -3,10 +3,12 @@
 > BG резюме: този документ е пълният чеклист за качване на Modal backend-а за демото. Без одобрение НЕ се деплойва live и НЕ се местят реални пари.
 
 ## 0. Preconditions (do NOT deploy if any fail)
-- [ ] `pnpm build` 9/9 green, `pnpm test` 10/10 green, `pytest modal_backend/` green (18 passed, 1 skipped).
+- [ ] `pnpm build` 9/9 green, `pnpm test` 11/11 suites green, `pytest modal_backend/` green (66 passed, 4 skipped opt-in live).
+- [ ] `modal_backend/openapi.snapshot.json` in sync: `python -c "from modal_backend.api import app; assert len(app.openapi()['paths'])==$(python3 -c "import json;print(len(json.load(open('modal_backend/openapi.snapshot.json'))['paths']))")"` (currently 40 paths).
 - [ ] `LIVE_MODE=false`, no `*_LIVE` keys in env or Modal Secrets (scan: `grep -r "LIVE_SECRET\|sk_live" --include="*.py" --include="*.ts" .` returns nothing).
 - [ ] `modal_backend/app.py` uses CPU only (`cpu<=0.5`, `memory<=512`), no GPU args, `min_containers=0`, no `schedule=` (on-demand reconcile only).
-- [ ] `store.py` is ephemeral — acknowledged: durable money state lives in external PostgreSQL / `apps/api` (system of record), Modal never authoritative.
+- [ ] Durable store: Modal Volume `hybridpay-data` mounted at `/mnt/data` (auto-created); Postgres via `DATABASE_URL` for prod. OpenAPI guard `test_openapi_coverage.py` green (no Swagger-only endpoints).
+- [ ] Crash-loop guards green: `pytest modal_backend/test_modal_mount.py` (absolute import + `add_local_dir` bake + non-blocking `Popen` in `modal_frontend.py`).
 - [ ] CORS `ALLOWED_ORIGINS` set to demo domains only (no `*`).
 - [ ] `GET /health` returns `liveMode: OFF` (or `BLOCKED`), `sandbox: true`.
 
@@ -29,8 +31,6 @@ modal secret create hybridpay-test \
   STRIPE_SECRET_KEY_TEST="" \
   STRIPE_WEBHOOK_SECRET_TEST="" \
   BTCPAY_URL_TEST="http://localhost:23000" \
-  STRIPE_WEBHOOK_SECRET_TEST="" \
-  BTCPAY_URL_TEST="http://localhost:23000" \
   BTCPAY_API_KEY_TEST="" \
   BTCPAY_STORE_ID_TEST="" \
   MODEL_API_KEY="" \
@@ -46,6 +46,16 @@ modal serve modal_backend/app.py
 # note the printed https://<user>--hybridpay-sandbox-fastapi-app.modal.run
 curl https://<preview-url>/health   # expect {"ok":true,"liveMode":"OFF","sandbox":true}
 ```
+
+## 3b. Staging tenant binding (required before any shared staging)
+- When `TENANT_FOR_SHARED_TOKEN` / `TENANT_FOR_ADMIN_TOKEN` are set, the tenant is
+  derived from the bearer token and any client `X-Tenant-Id` is ignored
+  (`require_tenant`, covered by `test_tenant_binding.py`). When unset, the header
+  is accepted (local-dev / open-demo mode only).
+- For any shared staging URL, set explicit tenants
+  (`TENANT_FOR_SHARED_TOKEN`, `TENANT_FOR_ADMIN_TOKEN`) + redeploy; never run
+  shared staging unbound. Re-run `pytest modal_backend/test_tenant_binding.py -q`
+  after changing bindings.
 
 ## 4. Stable hackathon deploy
 ```

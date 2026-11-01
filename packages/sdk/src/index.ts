@@ -186,6 +186,10 @@ export class ModalBackendClient {
     return this.request<{ postTo: string; body: unknown; headers: Record<string, string>; note: string; sandbox: boolean }>(
       `/api/webhooks/stripe/test`, { method: "POST", headers: this.headers(), body: JSON.stringify({}) });
   }
+  adminOverview() {
+    return this.request<{ tenant: string; sandbox: boolean; liveMode: string; rolesConfigured: { operator: boolean; admin: boolean }; tenantBinding: { shared: boolean; admin: boolean }; aiRateLimitPerMin: number; totals: { fiat: number; evm: number; agreements: number }; usersSeats: { managed: boolean; note: string } }>(
+      `/api/admin/overview`, { headers: this.headers() });
+  }
   // --- EVM Sepolia testnet (wallet signs; backend tracks + verifies, never holds keys) ---
   async evmRequest(body: EvmRequestBody, idempotencyKey: string) {
     assertEvmAddress(body.to);

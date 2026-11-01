@@ -424,6 +424,87 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/overview": {
+      "get": {
+        "description": "Admin-only operational overview. Derived from live config + store counts.\n\nNo secrets are ever echoed (only booleans). Seat/user invites remain out of\nscope for the sandbox: access is bearer-based via the `hybridpay-test` Modal\nSecret, so there is no user store to manage.",
+        "operationId": "admin_overview_api_admin_overview_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Tenant-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Admin Overview Api Admin Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin Overview"
+      }
+    },
     "/api/ai/analyze": {
       "post": {
         "operationId": "ai_analyze_api_ai_analyze_post",

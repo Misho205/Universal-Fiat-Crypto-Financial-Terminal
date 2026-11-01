@@ -56,6 +56,7 @@ SDK_HINTS = {
     "/api/reconcile/runs": ["/api/reconcile/runs"],
     "/api/dashboard/export": ["/api/dashboard/export"],
     "/api/webhooks/stripe/test": ["/api/webhooks/stripe/test"],
+    "/api/admin/overview": ["/api/admin/overview"],
 }
 
 # snapshot path -> token that must appear in probe_live.py. Parameterized paths
@@ -85,7 +86,7 @@ def _all_paths() -> set[str]:
 
 
 def test_snapshot_matches_live_count():
-    assert len(_all_paths()) == 39, f"snapshot drift: {len(_all_paths())} paths"
+    assert len(_all_paths()) == 40, f"snapshot drift: {len(_all_paths())} paths"
 
 
 def test_every_path_exercised_by_probe():

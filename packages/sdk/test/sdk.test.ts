@@ -143,6 +143,10 @@ describe("ai", () => {
     const fn4 = mockFetchOnce(200, { postTo: "/api/webhooks/stripe", sandbox: true });
     await c.webhookTest();
     expect((fn4.mock.calls[0] as unknown as [string])[0]).toBe("http://m/api/webhooks/stripe/test");
+    const fn5 = mockFetchOnce(200, { tenant: "t", sandbox: true, liveMode: "OFF" });
+    const ov = await c.adminOverview();
+    expect((fn5.mock.calls[0] as unknown as [string])[0]).toBe("http://m/api/admin/overview");
+    expect(ov.data.sandbox).toBe(true);
   });
 });
 
