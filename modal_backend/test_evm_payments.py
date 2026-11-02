@@ -22,6 +22,7 @@ H = {"X-Tenant-Id": TENANT, "Authorization": "Bearer dev-shared-token"}
 ADDR = "0x" + "ab" * 20
 TXH = "0x" + "11" * 32
 TXH2 = "0x" + "22" * 32
+TXH3 = "0x" + "33" * 32
 
 
 def _client() -> TestClient:
@@ -98,13 +99,17 @@ def test_receipt_confirmed_failed_replaced_via_mock_rpc(monkeypatch):
     # failed receipt path
     def fake_fail(endpoint, method, params):
         if method == "eth_getTransactionByHash":
-            return {"blockNumber": "0xc6", "hash": TXH}
+            return {"blockNumber": "0xc6", "hash": TXH3}
         if method == "eth_getTransactionReceipt":
             return {"status": "0x0"}
         return hex(300)
     monkeypatch.setattr(evm_mod, "_rpc", fake_fail)
     pid2 = _req(c, key="c2").json()["paymentId"]
-    c.post(f"/api/payments/evm/{pid2}/submit", json={"txHash": TXH}, headers=H)
+    # NOTE: distinct tx hash — replaying TXH (already bound to pid) on pid2
+    # is rejected with 409 REPLAY (cross-payment double-spend protection).
+    assert c.post(f"/api/payments/evm/{pid2}/submit", json={"txHash": TXH},
+                  headers=H).status_code == 409
+    c.post(f"/api/payments/evm/{pid2}/submit", json={"txHash": TXH3}, headers=H)
     assert c.get(f"/api/payments/evm/{pid2}", headers=H).json()["state"] == "failed"
 
 

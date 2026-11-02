@@ -41,8 +41,34 @@ for hackathon demos.
   guardrails (`modal_backend/institutional.py`, maker-checker intents, quorums,
   JIT, emergency, tamper-evident audit) — see `AI_SECURITY_POLICY.md`,
   `AI_TOOL_PERMISSIONS.md`, `AI_RED_TEAM_TESTS.md`.
+- **Financial Rights Protection** (`modal_backend/financial_rights/`, migration
+  `005_rights_pdp.sql`): explicit legal/contractual grounds, reason codes +
+  evidence, proportionality, time limits + review deadlines, independent review,
+  appeals with correction/restoration, AI-scores-never-auto-enforce,
+  jurisdiction profiles with legal-review gate, abuse monitoring —
+  see `FINANCIAL_RIGHTS_POLICY.md`, `RESTRICTION_REVIEW_WORKFLOW.md`,
+  `CUSTOMER_APPEALS_SPEC.md`.
+- **Centralized PDP/PEL** (`modal_backend/pdp/`): embedded deterministic
+  default-deny policy decision point (OPA-vs-Cerbos evaluation:
+  `docs/PDP_EVALUATION.md`), 23-action matrix (`docs/POLICY_MATRIX.md`),
+  enforcement on all sensitive endpoints, simulation + decision audit.
+- **Agreement/crypto guardrails**: terms-hash binding, versioned amendments
+  (dual consent), replay/double-execution protection, chain-bound EVM ids,
+  wallet-side signing only — see `docs/AGREEMENT_CRYPTO_GUARDRAILS.md`.
+- **Cryptographic approval binding** (`modal_backend/approval_binding.py`, migration
+  `006_approval_audit.sql`): canonical op digests (SHA-256), single-use atomic
+  consume, alt-account-resistant maker-checker, expiry+amount revalidation —
+  see `APPROVAL_BINDING_SECURITY.md`.
+- **Independent audit storage** (`modal_backend/audit_store.py`): structured
+  append-only events, hash-chained with seq, HMAC option, fail-closed writes,
+  JSONL export + outbox, read-only auditor dashboard — see
+  `AUDIT_ARCHITECTURE.md`, `AUDIT_INTEGRITY_TEST_REPORT.md`.
+- **Security audit package**: `SECURITY_AUDIT.md` (15 scenarios), `GUARDRAIL_TEST_REPORT.md`,
+  `THREAT_MODEL.md`, `REMEDIATION_PLAN.md`. Tests are evidence, not guarantees.
 - **Packages**: `domain` (exact money), `agreements` (DSL validator), `ledger` (balanced journal),
-  `policies` (OPA), `adapters` (mock/Stripe-sandbox/BTCPay-regtest), `sdk` (typed browser client).
+  `policies` (OPA Rego mirror for the NestJS/docker path; the Modal runtime PDP is
+  the embedded `modal_backend/pdp/` — see `docs/PDP_EVALUATION.md`),
+  `adapters` (mock/Stripe-sandbox/BTCPay-regtest), `sdk` (typed browser client).
 
 ## Quickstart (local, sandbox)
 1. `cp .env.example .env` — keep `LIVE_MODE=false`; fill only `*_TEST` keys. Frontend uses only
@@ -70,6 +96,11 @@ Full checklist, secrets, costs, verification, rollback, readiness: `docs/modal-d
 - `docs/bank-integration-guide.md` — embed the terminal in a bank/exchange (iframe, white-label, headless API, webhooks, go-live gates).
 - `docs/white-label-embed.md` — `?embed=1`, `NEXT_PUBLIC_BRAND_*`, palette overrides.
 - `AI_SECURITY_POLICY.md`, `AI_TOOL_PERMISSIONS.md`, `AI_RED_TEAM_TESTS.md` — AI + institutional guardrails.
+- `FINANCIAL_RIGHTS_POLICY.md`, `RESTRICTION_REVIEW_WORKFLOW.md`, `CUSTOMER_APPEALS_SPEC.md` — financial rights, review, appeals.
+- `docs/PDP_EVALUATION.md`, `docs/POLICY_MATRIX.md` — centralized PDP (OPA-vs-Cerbos selection) + authorization matrix.
+- `docs/AGREEMENT_CRYPTO_GUARDRAILS.md` — programmable-agreement + Sepolia guardrails, adversarial coverage.
+- `SECURITY_AUDIT.md`, `GUARDRAIL_TEST_REPORT.md`, `THREAT_MODEL.md`, `REMEDIATION_PLAN.md` — independent audit (15 scenarios), findings, residual risks.
+- `APPROVAL_BINDING_SECURITY.md`, `AUDIT_ARCHITECTURE.md`, `AUDIT_INTEGRITY_TEST_REPORT.md` — digest-bound approvals, independent audit storage.
 - `docs/fiat-sandbox.md` — fiat E2E architecture + mocked tests + documented Stripe TEST run.
 - `docs/modal-deploy-checklist.md` — deploy procedure, verification, rollback, costs, readiness.
 - `docs/live-mode.md` — LIVE guardrails (fail-closed).

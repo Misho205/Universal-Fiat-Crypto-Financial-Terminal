@@ -22,7 +22,8 @@ def test_fresh_apply_and_idempotent_rerun(tmp_path, monkeypatch):
     f = _fresh(tmp_path, monkeypatch)
     first = db.migrate()
     assert first == ["001_core.sql", "002_evm_pag.sql", "003_indexes.sql",
-                     "004_guardrails.sql"], first
+                     "004_guardrails.sql", "005_rights_pdp.sql",
+                     "006_approval_audit.sql"], first
     assert f.exists()
     assert db.migrate() == []  # rerun applies nothing
     conn = sqlite3.connect(str(f))
@@ -30,13 +31,19 @@ def test_fresh_apply_and_idempotent_rerun(tmp_path, monkeypatch):
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     for t in ("transactions", "idempotency", "evm_payments", "contract_agreements",
               "approval_intents", "elevation_grants", "emergency_access",
-              "security_audit", "schema_migrations"):
+              "security_audit", "schema_migrations",
+              "rights_restrictions", "rights_appeals", "pdp_decisions",
+              "approval_bindings", "audit_events", "audit_outbox"):
         assert t in tables, t
     indexes = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
     for ix in ("idx_tx_tenant_state", "idx_evm_tenant_state", "idx_pag_tenant_state",
                 "idx_tx_provider_ref", "idx_evm_provider_tx",
-                "idx_intents_tenant_state", "idx_grants_tenant_actor", "idx_audit_tenant"):
+                "idx_intents_tenant_state", "idx_grants_tenant_actor", "idx_audit_tenant",
+                "idx_rights_tenant_state", "idx_rights_subject",
+                "idx_appeals_restriction", "idx_pdp_tenant_action",
+                "idx_bindings_tenant_state", "idx_bindings_digest",
+                "idx_audit_tenant_seq", "idx_audit_action"):
         assert ix in indexes, ix
     conn.close()
     db._sqlite_conn = None

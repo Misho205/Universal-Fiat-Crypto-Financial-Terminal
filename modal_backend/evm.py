@@ -54,8 +54,37 @@ def explorer_link(tx_hash: str) -> str:
 
 
 def request_id(tenant: str, to: str, value_wei: str, nonce_scope: str) -> str:
-    digest = hashlib.sha256(f"{tenant}:{to}:{value_wei}:{nonce_scope}".encode()).hexdigest()[:12]
+    """Legacy chain-implied ID (Sepolia). Prefer request_id_for_chain."""
+    return request_id_for_chain(tenant, SEPOLIA_CHAIN_ID, to, value_wei, nonce_scope)
+
+
+def request_id_for_chain(tenant: str, chain_id: int, to: str,
+                         value_wei: str, nonce_scope: str) -> str:
+    """Chain-bound request ID: the same (to, value) on different chains can
+    never collide, and a mainnet request can never reuse a testnet ID."""
+    assert_testnet(chain_id)
+    digest = hashlib.sha256(
+        f"{tenant}:{chain_id}:{to}:{value_wei}:{nonce_scope}".encode()
+    ).hexdigest()[:12]
     return f"evm-{digest}"
+
+
+def verify_submission_attestation(tx_hash: str, from_address: str = "",
+                                  to_address: str = "") -> dict[str, str]:
+    """Validate a wallet-side signing attestation.
+
+    The backend NEVER signs and NEVER accepts private keys or seed phrases —
+    there is no such field anywhere in this module. A submission must carry a
+    well-formed tx hash (produced by the user's wallet) and, when provided, a
+    well-formed sender address. Returns the recorded attestation.
+    """
+    if not is_valid_txhash(tx_hash):
+        raise ValueError("invalid tx hash (expected 0x + 64 hex)")
+    if from_address and not is_valid_address(from_address):
+        raise ValueError("invalid from address (expected 0x + 40 hex)")
+    return {"txHash": tx_hash,
+            "submittedBy": from_address or "wallet-undisclosed",
+            "signedBy": "user-wallet (backend never signs)"}
 
 
 @dataclass

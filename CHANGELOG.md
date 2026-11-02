@@ -1,6 +1,55 @@
 # Changelog
 
 ## Unreleased (local only — NOT deployed; deploy needs explicit approval)
+- Independent security audit (15 adversarial scenarios, all sandbox): AI payment/
+  freeze attempts, prompt injection, self-approval, balance modification, audit
+  erasure, cross-tenant, replays, condition bypass, escalation, expired approvals,
+  unjustified/lawful restrictions, compromised AI, policy tamper. Found + fixed:
+  STRICT gate ignored expiry/amount (F-01), approvals lacked digests (F-02),
+  legacy intents never consumed (F-03), audit-chain gaps (F-05), auditor lockout
+  (F-06). Docs: `SECURITY_AUDIT.md`, `GUARDRAIL_TEST_REPORT.md`, `THREAT_MODEL.md`,
+  `REMEDIATION_PLAN.md` (residual R-03/R-04/R-05/R-07/R-08/R-10 planned).
+- Cryptographic approval binding (`approval_binding.py`, `approval_api.py`,
+  migration `006_approval_audit.sql`): canonical `ab-v1` ops, SHA-256 digests,
+  `credId` alt-account resistance, quorum, step-up, expiry, atomic single-use
+  consume wired into fiat cancel/refund + agreement execute (fail safe on
+  provider failure). 11 tests; `APPROVAL_BINDING_SECURITY.md` (hash != identity
+  limitation documented; WebAuthn for production).
+- Independent audit storage (`audit_store.py`, `audit_api.py`): structured
+  append-only `audit_events` (seq in digest, no truncation, HMAC option),
+  `must_audit` fail-closed on sensitive paths, JSONL export + outbox retry,
+  read-only auditor dashboard (`/api/audit/events`, `/verify`, `/export`),
+  WORM evaluation (S3 Object Lock / GCS / Azure). 9 integrity tests;
+  `AUDIT_ARCHITECTURE.md`, `AUDIT_INTEGRITY_TEST_REPORT.md` (no immutability
+  claims from hashing alone).
+- Tests: backend 182 passed / 4 skipped (+35: 15 security-audit, 11 binding,
+  9 integrity). Hermetic `sqlite_sequence` reset in `db.reset_for_tests`.
+- Financial Rights Protection Engine (`modal_backend/financial_rights/` + migration
+  `005_rights_pdp.sql`): explicit legal/contractual grounds, category distinction
+  (voluntary/fraud/contractual/legal-order/regulatory), mandatory reason codes +
+  evidence, proportionality ladder, time limits + review deadlines, independent
+  review, notification-when-permitted (gag-order suppression with audit), appeals
+  with correction/restoration, AI-score-never-auto-enforces guard, jurisdiction
+  profiles with qualified-legal-review gate (`BG`, `EU_GENERIC`), privacy-preserving
+  audit, employee-abuse monitoring. Docs: `FINANCIAL_RIGHTS_POLICY.md`,
+  `RESTRICTION_REVIEW_WORKFLOW.md`, `CUSTOMER_APPEALS_SPEC.md`.
+- Centralized PDP/PEL (`modal_backend/pdp/`): embedded deterministic default-deny
+  decision point (OPA-vs-Cerbos evaluation in `docs/PDP_EVALUATION.md` — embedded
+  selected for Modal serverless), 23-action `POLICY_MATRIX` (`docs/POLICY_MATRIX.md`),
+  `require_policy()` enforcement wired on fiat cancel/refund + agreement
+  execute/cancel/dispute/amend + all rights mutations, cross-tenant denial,
+  compromised-admin dual-control, explainable decisions, fail-closed, dry-run
+  simulation (`POST /api/pdp/simulate`), decision audit (`GET /api/pdp/decisions`).
+- Agreement + crypto hardening: `terms_hash` binding + tamper refusal at execute,
+  versioned `POST .../amend` (optimistic concurrency + dual consent, eligibility
+  freezes terms), in-flight race guard, chain-bound EVM request IDs, cross-payment
+  tx-hash replay refusal (`409 REPLAY`), wallet attestation (no key fields),
+  custody/escrow phrase rejection. Property-style (seeded) + adversarial tests
+  (`test_agreement_guardrails.py`, 13). Docs: `docs/AGREEMENT_CRYPTO_GUARDRAILS.md`.
+- Tests: backend 147 passed / 4 skipped (was 101/4: +15 rights, +12 PDP, +6 rights
+  API, +13 guardrails); fixed `test_migrations.py` + `test_evm_payments.py` for the
+  new migration and replay guard; pre-existing `test_tenant_binding`-after ordering
+  quirk documented (full-suite order green, also present before this change).
 - Bank/exchange integration package: `GET /ready` readiness probe (migrations + store,
   load-balancer friendly; SDK `ready()`; probe step), `docs/bank-integration-guide.md`
   (iframe/headless/white-label patterns, auth + tenant binding, core-banking and exchange

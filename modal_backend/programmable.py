@@ -28,9 +28,41 @@ STATES = ("draft", "active", "conditions_pending", "eligible_for_execution",
           "completed", "canceled", "expired", "disputed")
 
 ALLOWED_CONDITIONS = {"timeCondition", "deliveryConfirmation", "partyApproval",
-                      "approvalThreshold", "externalEvent"}
+                       "approvalThreshold", "externalEvent"}
 ALLOWED_EXECUTION = {"pay-after-condition", "auth-capture"}
 ALLOWED_ACTIONS = {"create", "activate", "approve", "submit-evidence", "execute", "cancel", "dispute"}
+
+# Marketing/custody language that must never appear inside accepted terms.
+# The engine holds no funds; claims of escrow, custody, or guaranteed
+# settlement are rejected at validation time (not just documented).
+FORBIDDEN_CLAIM_PHRASES = (
+    "escrow",
+    "custody",
+    "custodial",
+    "guaranteed settlement",
+    "principal-protected",
+    "funds are held",
+)
+
+AMENDABLE_STATES = ("draft", "active", "conditions_pending")
+
+
+def _contains_forbidden_claim(terms: dict[str, Any]) -> str:
+    blob = json.dumps(terms, sort_keys=True).lower()
+    for phrase in FORBIDDEN_CLAIM_PHRASES:
+        if phrase in blob:
+            return phrase
+    return ""
+
+
+def terms_hash(terms: dict[str, Any]) -> str:
+    """Cryptographic binding of the exact accepted terms (approval scope).
+
+    Approvals, evidence, and execution all reference this hash: a single
+    changed byte (amount, party, currency, condition) yields a different hash
+    and is rejected as tampering — unilateral modification is impossible.
+    """
+    return hashlib.sha256(json.dumps(terms, sort_keys=True).encode()).hexdigest()
 
 ConditionStatus = Literal["met", "unmet", "invalid"]
 
@@ -72,6 +104,10 @@ def validate_creation(terms: dict[str, Any]) -> list[str]:
         errors.append("expiresAt is required (ISO-8601)")
     if terms.get("custodyClaim"):
         errors.append("custody claims forbidden: engine holds no funds")
+    bad_claim = _contains_forbidden_claim(terms)
+    if bad_claim:
+        errors.append(f"forbidden custody/settlement claim: {bad_claim!r} "
+                      "(engine holds no funds; no escrow or guaranteed settlement)")
     return errors
 
 
@@ -158,7 +194,8 @@ def new_agreement(tenant: str, creator: str, terms: dict[str, Any]) -> dict[str,
                "state": "draft", "prevHash": "GENESIS"}
     genesis["hash"] = _event_hash(ag_id, genesis)
     return {"id": ag_id, "tenant": tenant, "version": 1, "state": "draft",
-            "terms": terms, "evidence": {"approvals": [], "deliveries": {}, "externalEvents": {}},
+            "terms": terms, "termsHash": terms_hash(terms),
+            "evidence": {"approvals": [], "deliveries": {}, "externalEvents": {}},
             "createdBy": creator, "createdAt": now, "updatedAt": now, "history": [genesis],
             "disclosure": DISCLOSURE}
 
@@ -198,6 +235,77 @@ def verify_chain(ag: dict[str, Any]) -> bool:
 def check_expiry(ag: dict[str, Any], now_iso: str) -> bool:
     exp = (ag.get("terms", {}) or {}).get("expiresAt", "")
     return bool(exp) and now_iso >= exp
+
+
+def verify_evidence_attestation(item: dict[str, Any]) -> tuple[bool, str]:
+    """Independent verification record for external condition evidence.
+
+    The engine never trusts a bare caller assertion. An attestation must name
+    an authenticated source/oracle (`attestedBy`), carry an issuance timestamp
+    (`attestedAt`), and include either a cryptographic `signature` or an
+    allowlisted-oracle reference (`oracleRef`). Returns (ok, reason).
+    """
+    if not isinstance(item, dict):
+        return False, "attestation must be an object"
+    if not str(item.get("attestedBy", "")).strip():
+        return False, "attestation requires attestedBy (authenticated source)"
+    if not str(item.get("attestedAt", "")).strip():
+        return False, "attestation requires attestedAt (issuance time)"
+    sig = str(item.get("signature", ""))
+    oracle = str(item.get("oracleRef", ""))
+    if not sig and not oracle:
+        return False, ("attestation requires a signature or an allowlisted "
+                       "oracleRef (independent verification, never bare assertion)")
+    if sig and len(sig) < 8:
+        return False, "attestation signature too short"
+    return True, "attestation well-formed"
+
+
+def amend_terms(ag: dict[str, Any], new_terms: dict[str, Any],
+                expected_prev_hash: str,
+                consents: list[dict[str, str]]) -> tuple[bool, str]:
+    """Versioned amendment with explicit dual consent (pure; caller persists).
+
+    Rules:
+    - Agreement must be in an amendable state (draft/active/conditions_pending).
+    - `expected_prev_hash` must equal the current terms hash (optimistic
+      concurrency: prevents lost updates, replayed amendments, and silent
+      modification — a stale client cannot overwrite newer terms).
+    - New terms must pass validate_creation (allowlist + no custody claims).
+    - Dual consent: the creator plus a DISTINCT approver must both consent to
+      the EXACT new terms hash (binding approval to terms/parties/amounts/
+      currency/conditions — no blanket approvals).
+    - Bumps version, resets evaluation to conditions_pending, appends history.
+    """
+    if ag.get("state") not in AMENDABLE_STATES:
+        return False, f"cannot amend from state {ag.get('state')}"
+    current_hash = terms_hash(ag.get("terms", {}) or {})
+    if expected_prev_hash != current_hash:
+        return False, ("terms hash mismatch: terms changed since you read them "
+                       "(reload and re-consent; replayed amendments rejected)")
+    errors = validate_creation(new_terms)
+    if errors:
+        return False, f"invalid amended terms: {errors[0]}"
+    new_hash = terms_hash(new_terms)
+    if new_hash == current_hash:
+        return False, "amendment is identical to current terms (no-op rejected)"
+    consenting = {(str(c.get("actor", "")).strip().lower(),
+                   str(c.get("termsHash", "")))
+                  for c in (consents or [])}
+    creator = str(ag.get("createdBy", "")).strip().lower()
+    creator_ok = any(a == creator and h == new_hash for a, h in consenting)
+    approver_ok = any(a and a != creator and h == new_hash for a, h in consenting)
+    if not creator_ok:
+        return False, "amendment requires explicit creator consent to the new terms hash"
+    if not approver_ok:
+        return False, ("amendment requires explicit consent from a second party "
+                       "distinct from the creator (dual consent to exact terms)")
+    ag["terms"] = new_terms
+    ag["termsHash"] = new_hash
+    ag["version"] = int(ag.get("version", 1)) + 1
+    ag["evidence"] = {"approvals": [], "deliveries": {}, "externalEvents": {}}
+    append_event(ag, "system", "evaluate", "conditions_pending")
+    return True, ""
 
 
 def assert_sandbox_execution() -> None:

@@ -1,7 +1,8 @@
 # IMPLEMENTATION_STATUS.md — Universal Hybrid Payment Terminal
 
-Generated: 2026-10-31 (UTC); updated 2026-11-01 (UTC, commit a4a5dfa + working tree below).
-Scope: user-facing app + persistent data layer (dashboard, auth/RBAC, Postgres/Volume durability, migrations).
+Generated: 2026-10-31 (UTC); updated 2026-11-02 (UTC, working tree below).
+Scope: user-facing app + persistent data layer (dashboard, auth/RBAC, Postgres/Volume durability, migrations)
++ Financial Rights Protection Engine + centralized PDP/PEL + agreement/crypto guardrails.
 Policy: no invented results — every claim below cites an executed command or a file.
 
 Deployed (approved 2026-10-31, commit 9b5971b): backend
@@ -53,6 +54,39 @@ a11y contract tests, load probe, AI + institutional guardrails (see CHANGELOG +
   and `test_programmable_contracts.py` (5 passed).
 - `node --test tests/property tests/integration` (explicit files) → 4/4.
 - `POST /api/payments/fiat/simulate` live local → 201 `AUTHORIZED`; `/health` → `liveMode OFF`.
+
+## 3b. Financial rights + PDP + guardrails (2026-11-02, executed, sandbox only)- `pytest modal_backend/` → **147 passed, 4 skipped** (was 101/4; +15
+  `test_financial_rights.py`, +12 `test_pdp.py`, +6 `test_rights_api.py`, +13
+  `test_agreement_guardrails.py`). New code:
+  `modal_backend/financial_rights/` (engine, jurisdictions, appeals, monitoring),
+  `modal_backend/pdp/` (embedded PDP `POLICY_BUNDLE_VERSION=2026.11.02-v1` +
+  FastAPI enforcement), `modal_backend/rights_api.py` (9 rights/PDP routes),
+  migration `005_rights_pdp.sql`, hardening in `programmable.py`/`evm.py`/`api.py`
+  (terms-hash binding, versioned amend, chain-bound EVM ids, tx-hash replay
+  refusal, `require_policy()` on 5 sensitive endpoints).
+- Two pre-existing tests updated for intentional behavior tightening (not
+  regressions): `test_migrations.py` (new migration file in expected list),
+  `test_evm_payments.py` (same tx hash on two payments is now 409 REPLAY).
+- Verified live-local: restriction create → 201 (notifyCustomer true),
+  gag-order legal restriction → notifyCustomer false + audited, AI-score-only
+  → 422, appeal overturn → restriction lifted + correctionPlan, PDP simulate
+  cross-tenant → deny, `GET /api/pdp/policy-version` pinned.
+- No auto-deploy performed (`modal deploy` NOT run — explicit operator step).
+
+## 3c. Security audit + approval binding + independent audit (2026-11-02, sandbox only)
+- `pytest modal_backend/` → **182 passed, 4 skipped** (+35: 15 `test_security_audit.py`
+  scenarios S1–S15, 11 `test_approval_binding.py`, 9 `test_audit_integrity.py`).
+- New: `approval_binding.py` + `approval_api.py` (canonical `ab-v1` digests, credId
+  alt-account resistance, atomic single-use consume wired into fiat cancel/refund +
+  agreement execute), `audit_store.py` + `audit_api.py` (structured chain, HMAC option,
+  fail-closed writes, JSONL export + outbox, auditor dashboard), migration
+  `006_approval_audit.sql`.
+- Fixed: STRICT expiry+amount (F-01); legacy digest-less approvals (F-02, bindings);
+  unconsumed intents (F-03, consume-before-provider on binding paths); audit gaps
+  (F-05); auditor lockout (F-06). Residual R-03/R-04/R-05/R-07/R-08/R-10 planned.
+- Docs: `SECURITY_AUDIT.md`, `GUARDRAIL_TEST_REPORT.md`, `THREAT_MODEL.md`,
+  `REMEDIATION_PLAN.md`, `APPROVAL_BINDING_SECURITY.md`, `AUDIT_ARCHITECTURE.md`,
+  `AUDIT_INTEGRITY_TEST_REPORT.md`. No auto-deploy; no production capabilities added.
 
 ## 4. Implemented but NOT live-tested (needs operator key/infra)
 - Stripe TEST network calls (`StripeTestProvider.create/confirm/retrieve`) — mocked path tested; real

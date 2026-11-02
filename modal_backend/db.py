@@ -214,18 +214,31 @@ def reset_for_tests() -> None:
             for table in ("transactions", "idempotency", "evm_payments",
                           "contract_agreements", "approval_intents",
                           "elevation_grants", "emergency_access",
-                          "security_audit", "schema_migrations"):
+                          "security_audit", "schema_migrations",
+                          "rights_restrictions", "rights_appeals",
+                          "pdp_decisions", "approval_bindings",
+                          "audit_events", "audit_outbox"):
                 try:
                     conn.execute(f"DELETE FROM {table}")
                 except Exception:
                     pass
             conn.commit()
         migrate()
+        try:
+            # Hermetic tests: restart AUTOINCREMENT counters so seq-based
+            # assertions (gaps, ordering) are independent of test order.
+            conn.execute("DELETE FROM sqlite_sequence WHERE name IN "
+                         "('security_audit','audit_events','audit_outbox')")
+            conn.commit()
+        except Exception:
+            pass
         return
     # postgres test database: clear rows only
     for table in ("transactions", "idempotency", "evm_payments", "contract_agreements",
-                  "approval_intents", "elevation_grants", "emergency_access",
-                  "security_audit"):
+                   "approval_intents", "elevation_grants", "emergency_access",
+                   "security_audit", "rights_restrictions", "rights_appeals",
+                   "pdp_decisions", "approval_bindings", "audit_events",
+                   "audit_outbox"):
         _exec_write(f"DELETE FROM {table}")
 
 
@@ -324,6 +337,18 @@ def evm_upsert(rec: dict[str, Any]) -> None:
 
 def evm_get(pid: str, tenant: str) -> dict[str, Any] | None:
     row = _fetch_one("SELECT * FROM evm_payments WHERE id=? AND tenant=?", (pid, tenant))
+    if not row:
+        return None
+    return {"id": row["id"], "tenant": row["tenant"], "chain_id": row["chain_id"],
+            "to": row["to_address"], "value_wei": row["value_wei"], "state": row["state"],
+            "tx_hash": row["tx_hash"], "replaced_by": row["replaced_by"],
+            "confirmations": row["confirmations"], "expires_at": row["expires_at"]}
+
+
+def evm_by_tx_hash(tx_hash: str, tenant: str) -> dict[str, Any] | None:
+    """Find a tracked payment by tx hash (cross-payment replay detection)."""
+    row = _fetch_one("SELECT * FROM evm_payments WHERE tx_hash=? AND tenant=?",
+                     (tx_hash, tenant))
     if not row:
         return None
     return {"id": row["id"], "tenant": row["tenant"], "chain_id": row["chain_id"],

@@ -34,6 +34,10 @@ from pydantic import BaseModel, Field
 from . import ai, config, contracts, institutional, meta_client, payments, programmable, providers, store
 from . import db as _db
 from . import evm as evm_mod
+from . import rights_api as _rights_api
+from . import approval_api as _approval_api
+from . import audit_api as _audit_api
+from .pdp.enforcement import require_policy as _require_policy
 from .ai_guardrails import audit as ai_audit
 from .ai_guardrails import policy as ai_policy
 from .ai_guardrails import redaction as ai_redaction
@@ -64,20 +68,119 @@ def _strict_intent_required(*, tenant: str, action: str, target_id: str,
     existing sandbox flows keep working; production deployments set STRICT=1,
     after which direct calls fail closed with 403 INTENT_REQUIRED and only an
     approved multi-party intent (maker + distinct checker quorum) unlocks them.
+
+    The matched intent must be approved AND unexpired AND amount-bound: an
+    expired approval or an approval for a different amount never unlocks
+    execution (fix for audit finding: expired approvals were previously
+    accepted because expiresAt/amount were never compared here).
     """
     if not institutional.STRICT:
         return
+    now = int(time.time())
     intents = _db.intent_list(tenant)
     for it in intents:
         full = _db.intent_get(it["id"], tenant)
         if (full and full["action"] == action and full["targetId"] == target_id
-                and full["state"] == "approved"):
+                and full["state"] == "approved"
+                and int(full.get("expiresAt", 0)) > now
+                and str(full.get("amountMinor", "0")) == str(amount_minor)):
             return
     _db.audit_append(tenant, f"institutional.intent.missing", "policy-engine",
                      f"{action} {target_id} blocked: no approved intent (strict mode)")
     raise HTTPException(status_code=403, detail="INTENT_REQUIRED: approved maker-checker intent required")
 
+
+def _must_audit_or_503(*, tenant: str, actor: str, action: str, resource: str,
+                       outcome: str, detail: str = "",
+                       approval_ref: str = "") -> None:
+    """Mandatory audit write for sensitive operations (fail closed).
+
+    Records a structured event BEFORE the state-changing call. When audit
+    storage is unavailable the operation is refused with 503 — executing
+    money movement or authority changes without a durable record is never
+    allowed. Storage errors are never swallowed on this path.
+    """
+    from . import audit_store as _audit
+
+    try:
+        _audit.must_audit(tenant=tenant, actor=actor, action=action,
+                          resource=resource, outcome=outcome, policy="ab-v1",
+                          approval_ref=approval_ref, detail=detail)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"audit unavailable, "
+                                                   f"fail closed: {exc}") from exc
+
+
+def _binding_enforce(*, tenant: str, op_type: str, target_id: str,
+                     amount_minor: str = "0", currency: str = "",
+                     contract_version: int = 0, terms_hash: str = "",
+                     counterparty: str = "") -> dict[str, Any] | None:
+    """Cryptographic approval-binding enforcement (additive, backward compatible).
+
+    When live bindings exist for (tenant, op_type, target_id), exactly one
+    must fully validate against CURRENT stored parameters — otherwise the
+    operation is refused (parameters changed after approval / expired /
+    quorum unmet / already consumed). The winning binding is consumed
+    atomically BEFORE the provider call, so concurrent executors cannot both
+    execute (no double execution even with distinct idempotency keys).
+
+    When NO binding exists, returns None and the legacy intent path applies
+    (existing sandbox flows keep working). A consumed binding is never
+    resurrected: retries need fresh approvals (fail safe, documented).
+    """
+    from . import approval_binding as _ab
+
+    candidates = _ab.binding_find_candidates(tenant, op_type, target_id)
+    if not candidates:
+        return None
+    now = int(time.time())
+    failures: list[str] = []
+    for cand in candidates:
+        op = cand.get("op", {}) or {}
+        if str(op.get("amount_minor", "0")) != str(amount_minor):
+            failures.append("amount changed after approval"); continue
+        if currency and str(op.get("currency", "")) != currency:
+            failures.append("currency changed after approval"); continue
+        if terms_hash and str(op.get("terms_hash", "")) != terms_hash:
+            failures.append("terms changed after approval"); continue
+        if counterparty and str(op.get("counterparty", "")) != counterparty:
+            failures.append("counterparty changed after approval"); continue
+        if cand["state"] != "approved":
+            failures.append(f"binding is {cand['state']}"); continue
+        if now >= int(cand.get("expiresAt", 0)):
+            failures.append("approval expired"); continue
+        if not institutional.quorum_met(cand.get("approvals", []),
+                                        cand.get("quorum", 1)):
+            failures.append("quorum not met"); continue
+        try:
+            consumed = _ab.consume_binding(cand["op_digest"], tenant, now)
+        except (LookupError, ValueError) as exc:
+            failures.append(str(exc)[:160]); continue
+        _db.audit_append(tenant, f"approval.binding.consumed", "policy-engine",
+                         f"{consumed['id']} {op_type} {target_id}"[:500])
+        from . import audit_store as _audit
+
+        _audit.must_audit(tenant=tenant, actor="policy-engine",
+                          action="approval.binding.consumed",
+                          resource=consumed["id"], outcome="consumed",
+                          policy="ab-v1", approval_ref=consumed["id"],
+                          detail=f"{op_type} {target_id}")
+        return consumed
+    raise HTTPException(status_code=409, detail="APPROVAL_BINDING: " + (
+        "; ".join(dict.fromkeys(failures)) if failures
+        else "no valid approval for current parameters (fresh approvals required)"))
+
 app = FastAPI(title="HybridPay Modal Sandbox Backend", version="0.1.0")
+
+# Financial Rights Protection Engine + centralized PDP HTTP surface.
+# Router evaluates server-side on every mutation; the frontend cannot bypass.
+app.include_router(_rights_api.router)
+
+# Cryptographic approval bindings: canonical op digests + single-use consume.
+app.include_router(_approval_api.router)
+
+# Independent structured audit: read-only dashboard + verify + export.
+app.include_router(_audit_api.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -129,6 +232,9 @@ class EvmRequestIn(BaseModel):
 
 class EvmSubmitIn(BaseModel):
     txHash: str = Field(min_length=66, max_length=66)
+    # Optional wallet-side signing attestation (sender address only).
+    # Private keys / seed phrases are NEVER accepted here (no such field exists).
+    fromAddress: str = Field(default="", max_length=42)
 
 
 class EvmReplaceIn(BaseModel):
@@ -148,6 +254,19 @@ class PagActorIn(BaseModel):
 class PagEvidenceIn(BaseModel):
     actor: str = Field(min_length=1, max_length=80)
     evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class PagConsentIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    termsHash: str = Field(min_length=1, max_length=128)
+
+
+class PagAmendIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=20)
+    expectedPrevHash: str = Field(min_length=1, max_length=128)
+    newTerms: dict[str, Any]
+    consents: list[PagConsentIn] = Field(default_factory=list, max_length=8)
 
 
 class CryptoSimulateIn(BaseModel):
@@ -580,6 +699,7 @@ async def fiat_list(tenant: str = Depends(require_tenant),
 @app.post("/api/payments/fiat/{payment_id}/cancel")
 async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
                       caller: str = Depends(require_admin),
+                      policy: dict[str, Any] = Depends(_require_policy("payment.cancel", "payment")),
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
     """Admin only: cancels a non-terminal payment (money movement). Idempotent via Idempotency-Key."""
     rec = _load_owned(payment_id, tenant)
@@ -592,6 +712,13 @@ async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
     rec = _load_owned(payment_id, tenant)
     if rec["state"] not in ("created", "pending", "unknown"):
         raise HTTPException(status_code=409, detail=f"cannot cancel from state {rec['state']}")
+    _binding_enforce(tenant=tenant, op_type="fiat.cancel", target_id=payment_id,
+                     amount_minor=rec.get("amountMinor", "0"),
+                     currency=rec.get("currency", ""))
+    _must_audit_or_503(tenant=tenant, actor="policy-engine",
+                       action="payment.fiat.cancel.start", resource=payment_id,
+                       outcome="authorized",
+                       detail=f"amount={rec.get('amountMinor')}")
     try:
         result = get_fiat_provider().cancel(rec["providerRef"])
     except ProviderError as exc:
@@ -608,6 +735,7 @@ async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
 @app.post("/api/payments/fiat/{payment_id}/refund")
 async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends(require_tenant),
                       caller: str = Depends(require_admin),
+                      policy: dict[str, Any] = Depends(_require_policy("payment.refund", "payment")),
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
     """Admin only: refunds a succeeded payment (money movement). Idempotent via Idempotency-Key."""
     payload = {"payment_id": payment_id, **body.model_dump()}
@@ -622,6 +750,13 @@ async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends
         return _public(hit["response"])
     if rec["state"] != "succeeded":
         raise HTTPException(status_code=409, detail="only succeeded payments can be refunded")
+    _binding_enforce(tenant=tenant, op_type="fiat.refund", target_id=payment_id,
+                     amount_minor=rec.get("amountMinor", "0"),
+                     currency=rec.get("currency", ""))
+    _must_audit_or_503(tenant=tenant, actor="policy-engine",
+                       action="payment.fiat.refund.start", resource=payment_id,
+                       outcome="authorized",
+                       detail=f"amount={rec.get('amountMinor')}")
     try:
         result = get_fiat_provider().refund(rec["providerRef"],
                                             int(body.amountMinor) if body.amountMinor else None)
@@ -694,7 +829,9 @@ async def evm_request(
         if hit["payload"] != payload:
             raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
         return _public(hit["response"])
-    pid = evm_mod.request_id(tenant, body.to, body.valueWei, idempotency_key or payload["to"])
+    pid = evm_mod.request_id_for_chain(tenant, body.chainId, body.to,
+                                             body.valueWei,
+                                             idempotency_key or payload["to"])
     now = int(time.time())
     _db.evm_upsert({"id": pid, "tenant": tenant, "chain_id": body.chainId, "to": body.to,
                     "value_wei": body.valueWei, "state": "requested",
@@ -715,16 +852,32 @@ async def evm_submit(payment_id: str, body: EvmSubmitIn, tenant: str = Depends(r
     rec = _db.evm_get(payment_id, tenant)
     if not rec:
         raise HTTPException(status_code=404, detail="not found")
+    # Wallet-side signing attestation (format validation; backend never signs,
+    # never receives keys — txHash/fromAddress are public on-chain data).
+    try:
+        attestation = evm_mod.verify_submission_attestation(
+            body.txHash, body.fromAddress, rec.get("to", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Cross-payment replay: one on-chain tx funds at most one tracked request
+    # per tenant (the same hash on a second request is a replay/double-spend).
+    other = _db.evm_by_tx_hash(body.txHash, tenant)
+    if other and other["id"] != payment_id:
+        raise HTTPException(status_code=409, detail=f"REPLAY: tx hash already bound "
+                                                   f"to payment {other['id']}")
     if not evm_mod.is_valid_txhash(body.txHash):
         raise HTTPException(status_code=422, detail="invalid tx hash")
     if rec["state"] in ("confirmed", "failed", "expired"):
         raise HTTPException(status_code=409, detail=f"terminal state {rec['state']}, no resubmit")
     if rec["tx_hash"] and rec["tx_hash"] != body.txHash:
         rec = {**rec, "state": "replaced", "replaced_by": body.txHash}
-    rec = {**rec, "state": "pending", "tx_hash": body.txHash}
+    rec = {**rec, "state": "pending", "tx_hash": body.txHash,
+           "submitted_by": attestation["submittedBy"]}
     _db.evm_upsert(rec)
     log_event(logger, "payment.evm.submitted", tenant=tenant, caller=caller, paymentId=payment_id)
     return {"paymentId": payment_id, "state": "pending", "txHash": body.txHash,
+            "submittedBy": attestation["submittedBy"],
+            "signedBy": attestation["signedBy"],
             "explorer": evm_mod.explorer_link(body.txHash), "sandbox": True,
             "note": "pending = submitted, NOT confirmed. Receipt verification decides."}
 
@@ -768,6 +921,10 @@ async def evm_replace(payment_id: str, body: EvmReplaceIn, tenant: str = Depends
         raise HTTPException(status_code=404, detail="not found")
     if not evm_mod.is_valid_txhash(body.newTxHash):
         raise HTTPException(status_code=422, detail="invalid tx hash")
+    other = _db.evm_by_tx_hash(body.newTxHash, tenant)
+    if other and other["id"] != payment_id:
+        raise HTTPException(status_code=409, detail=f"REPLAY: tx hash already bound "
+                                                   f"to payment {other['id']}")
     if rec["state"] in ("confirmed", "failed", "expired"):
         raise HTTPException(status_code=409, detail=f"terminal state {rec['state']}")
     old = rec.get("tx_hash", "")
@@ -814,6 +971,7 @@ async def pag_create(body: PagCreateIn, tenant: str = Depends(require_tenant),
     ag = programmable.new_agreement(tenant, body.creator, body.terms)
     _db.pag_put(ag)
     response = {"agreementId": ag["id"], "version": 1, "state": "draft",
+                "termsHash": ag["termsHash"],
                 "disclosure": programmable.DISCLOSURE, "sandbox": True}
     store.idem_store(key, {"payload": body.model_dump(), "response": response})
     log_event(logger, "contract.pag.created", tenant=tenant, caller=caller, agreementId=ag["id"])
@@ -831,8 +989,12 @@ async def pag_get(agreement_id: str, tenant: str = Depends(require_tenant),
             programmable.append_event(ag, "system", "evaluate", "expired")
             _db.pag_put(ag)
     statuses = programmable.evaluate_all(ag["terms"], ag.get("evidence", {}), now_iso)
+    stored_hash = ag.get("termsHash", "")
+    current_hash = programmable.terms_hash(ag.get("terms", {}) or {})
     return {"agreementId": ag["id"], "version": ag.get("version", 1), "state": ag["state"],
-            "terms": ag["terms"], "evidence": ag.get("evidence", {}),
+            "terms": ag["terms"], "termsHash": current_hash,
+            "termsValid": bool(stored_hash) and stored_hash == current_hash,
+            "evidence": ag.get("evidence", {}),
             "conditionStatuses": statuses, "eligible": programmable.all_met(statuses),
             "chainValid": programmable.verify_chain(ag), "history": ag.get("history", []),
             "disclosure": programmable.DISCLOSURE, "sandbox": True}
@@ -904,9 +1066,35 @@ async def pag_evidence(agreement_id: str, body: PagEvidenceIn, tenant: str = Dep
             "sandbox": True}
 
 
+@app.post("/api/contracts/programmable/{agreement_id}/amend")
+async def pag_amend(agreement_id: str, body: PagAmendIn, tenant: str = Depends(require_tenant),
+                    caller: str = Depends(require_admin),
+                    policy: dict[str, Any] = Depends(_require_policy("agreement.amend", "agreement"))) -> dict[str, Any]:
+    """Versioned amendment: optimistic-concurrency hash + explicit dual consent.
+
+    Material changes require the creator AND a distinct approver to consent to
+    the EXACT new terms hash. Stale/replayed amendments (wrong prev hash) are
+    rejected; approvals never transfer across versions.
+    """
+    ag = _load_pag(agreement_id, tenant)
+    _strict_intent_required(tenant=tenant, action="agreement.amend", target_id=agreement_id,
+                            amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")))
+    ok, why = programmable.amend_terms(
+        ag, body.newTerms, body.expectedPrevHash,
+        [c.model_dump() for c in body.consents])
+    if not ok:
+        raise HTTPException(status_code=409, detail=why)
+    _db.pag_put(ag)
+    log_event(logger, "contract.pag.amended", tenant=tenant, caller=caller,
+              agreementId=ag["id"])
+    return {"agreementId": ag["id"], "version": ag["version"],
+            "state": ag["state"], "termsHash": ag["termsHash"], "sandbox": True}
+
+
 @app.post("/api/contracts/programmable/{agreement_id}/execute")
 async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
                       caller: str = Depends(require_admin),
+                      policy: dict[str, Any] = Depends(_require_policy("agreement.execute", "agreement")),
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
     """Execute an ELIGIBLE agreement via the fiat sandbox provider. Three gates:
     deterministic eligibility AND explicit human authorization (role executor) AND
@@ -916,21 +1104,42 @@ async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends
         raise HTTPException(status_code=403, detail="execution requires human executor authorization")
     _strict_intent_required(tenant=tenant, action="agreement.execute", target_id=agreement_id,
                             amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")))
+    # Idempotency first: a retried execution with the SAME key returns the
+    # original response without touching the provider (safe retry). A retry
+    # with a DIFFERENT key falls through to the state gates below, where the
+    # terminal `completed` state refuses duplicate execution (no double spend).
+    key = _idem_key(tenant, "pag-execute", idempotency_key, {"agreement": agreement_id})
+    hit = store.idem_lookup(key)
+    if hit:
+        return _public(hit["response"])
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if programmable.check_expiry(ag, now_iso):
         raise HTTPException(status_code=410, detail="agreement expired")
+    # Tamper check: execution binds the EXACT accepted terms. Any unilateral
+    # modification (amount/party/currency/condition) changes the hash and the
+    # execution is refused — approvals never transfer to altered terms.
+    stored_hash = ag.get("termsHash", "")
+    if not stored_hash or stored_hash != programmable.terms_hash(ag.get("terms", {}) or {}):
+        raise HTTPException(status_code=409, detail="TERMS_TAMPERED: stored terms hash "
+                                                   "does not match accepted terms; execution refused")
     statuses = programmable.evaluate_all(ag["terms"], ag.get("evidence", {}), now_iso)
     if not programmable.all_met(statuses):
         raise HTTPException(status_code=409, detail={"eligible": False, "conditionStatuses": statuses,
                                                      "note": "eligibility and execution are separate; conditions unmet"})
     if ag["state"] != "eligible_for_execution":
         raise HTTPException(status_code=409, detail=f"state {ag['state']} is not eligible_for_execution")
-    key = _idem_key(tenant, "pag-execute", idempotency_key, {"agreement": agreement_id})
-    hit = store.idem_lookup(key)
-    if hit:
-        return _public(hit["response"])
     programmable.assert_sandbox_execution()
     terms = ag["terms"]
+    _binding_enforce(tenant=tenant, op_type="agreement.execute",
+                     target_id=agreement_id,
+                     amount_minor=str(terms.get("amountMinor", "0")),
+                     currency=terms.get("currency", ""),
+                     contract_version=int(ag.get("version", 1)),
+                     terms_hash=ag.get("termsHash", ""))
+    _must_audit_or_503(tenant=tenant, actor=body.actor,
+                       action="contract.pag.execute.start", resource=agreement_id,
+                       outcome="authorized",
+                       detail=f"version={ag.get('version', 1)}")
     try:
         created = get_fiat_provider().create(int(terms["amountMinor"]), terms.get("currency", "EUR"),
                                              f"{agreement_id}-exec")
@@ -938,6 +1147,13 @@ async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends
     except ProviderError as exc:
         raise HTTPException(status_code=502 if exc.code == "TIMEOUT_UNKNOWN" else 422,
                             detail=f"{exc.code}: {exc}") from exc
+    # Race guard: a competing execution may have completed while the provider
+    # call was in flight. Re-check the stored state before marking completed —
+    # duplicate execution (double spend) is refused even with distinct keys.
+    fresh = _load_pag(agreement_id, tenant)
+    if fresh["state"] != "eligible_for_execution":
+        raise HTTPException(status_code=409, detail=f"state changed during execution "
+                                                   f"({fresh['state']}); duplicate execution refused")
     programmable.append_event(ag, body.actor, "execute", "completed")
     _db.pag_put(ag)
     response = {"agreementId": ag["id"], "state": "completed",
@@ -951,7 +1167,8 @@ async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends
 
 @app.post("/api/contracts/programmable/{agreement_id}/cancel")
 async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
-                     caller: str = Depends(require_admin)) -> dict[str, Any]:
+                     caller: str = Depends(require_admin),
+                     policy: dict[str, Any] = Depends(_require_policy("agreement.cancel", "agreement"))) -> dict[str, Any]:
     """Admin only (irreversible terminal state)."""
     ag = _load_pag(agreement_id, tenant)
     _strict_intent_required(tenant=tenant, action="agreement.cancel", target_id=agreement_id,
@@ -966,7 +1183,8 @@ async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(
 
 @app.post("/api/contracts/programmable/{agreement_id}/dispute")
 async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_admin)) -> dict[str, Any]:
+                      caller: str = Depends(require_admin),
+                      policy: dict[str, Any] = Depends(_require_policy("agreement.dispute", "agreement"))) -> dict[str, Any]:
     """Admin only (freezes execution). Raising party identity is recorded in history."""
     ag = _load_pag(agreement_id, tenant)
     _strict_intent_required(tenant=tenant, action="agreement.dispute", target_id=agreement_id,
