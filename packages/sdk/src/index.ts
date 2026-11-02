@@ -348,6 +348,71 @@ export class ModalBackendClient {
       headers: this.headers(),
     });
   }
+  aiPolicy() {
+    return this.request<{ advisoryOnly: boolean; allowedTools: string[]; forbiddenActions: string[]; sandbox: boolean }>(`/api/ai/policy`, {
+      headers: this.headers(),
+    });
+  }
+  aiDecision(kind: string, output: unknown) {
+    return this.request<{ approved: boolean; autoEnforced: boolean; requiresHumanReview: boolean; advisoryOnly: boolean }>(`/api/ai/decision`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ kind, output: output ?? {} }),
+    });
+  }
+  aiKillSwitch(disabled: boolean, reason = "") {
+    return this.request<{ disabled: boolean }>(`/api/admin/ai/kill-switch`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ disabled, reason }),
+    });
+  }
+  aiAudit() {
+    return this.request<{ chainValid: boolean; events: unknown[] }>(`/api/admin/ai/audit`, {
+      headers: this.headers(),
+    });
+  }
+  approvalCreate(intent: { action: string; targetId?: string; amountMinor?: string; maker: string; reason: string }, idempotencyKey: string) {
+    return this.request<{ intentId: string; state: string; quorum: number }>(`/api/approvals/intents`, {
+      method: "POST", headers: { ...this.headers(), "Idempotency-Key": idempotencyKey }, body: JSON.stringify(intent),
+    });
+  }
+  approvalList() {
+    return this.request<{ intents: { id: string; action: string; state: string }[] }>(`/api/approvals/intents`, {
+      headers: this.headers(),
+    });
+  }
+  approvalGet(intentId: string) {
+    return this.request<{ id: string; state: string; approvals: unknown[] }>(`/api/approvals/intents/${encodeURIComponent(intentId)}`, {
+      headers: this.headers(),
+    });
+  }
+  approvalApprove(intentId: string, approval: { checker: string; confirm: boolean; reason: string }, idempotencyKey: string) {
+    return this.request<{ intentId: string; state: string }>(`/api/approvals/intents/${encodeURIComponent(intentId)}/approve`, {
+      method: "POST", headers: { ...this.headers(), "Idempotency-Key": idempotencyKey }, body: JSON.stringify(approval),
+    });
+  }
+  elevationGrant(grant: { actor: string; scopes: string[]; purpose: string; ttlSec?: number }) {
+    return this.request<{ grantId: string; expiresAt: number }>(`/api/admin/elevation`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(grant),
+    });
+  }
+  grants(actor: string) {
+    return this.request<{ actor: string; grants: unknown[] }>(`/api/admin/grants?actor=${encodeURIComponent(actor)}`, {
+      headers: this.headers(),
+    });
+  }
+  emergencyGrant(body: { actor: string; justification: string; ttlSec?: number }) {
+    return this.request<{ emergencyId: string; reviewRequired: boolean }>(`/api/admin/emergency`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(body),
+    });
+  }
+  emergencyReview(emergencyId: string, review: { actor: string; role: string }) {
+    return this.request<{ reviewed: boolean }>(`/api/admin/emergency/${encodeURIComponent(emergencyId)}/review`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(review),
+    });
+  }
+  securityAudit(limit = 100) {
+    return this.request<{ chainValid: boolean; events: unknown[] }>(`/api/admin/audit?limit=${limit}`, {
+      headers: this.headers(),
+    });
+  }
   me() {
     return this.request<MeInfo>(`/api/me`, {
       headers: this.headers(),
@@ -355,6 +420,11 @@ export class ModalBackendClient {
   }
   health() {
     return this.request<HealthInfo>("/health", { headers: this.headers() });
+  }
+  ready() {
+    return this.request<{ ok: boolean; sandbox: boolean; liveMode: string; checks: Record<string, unknown> }>(`/ready`, {
+      headers: this.headers(),
+    });
   }
   dashboardSummary() {
     return this.request<DashboardSummary>(`/api/dashboard/summary`, {

@@ -27,6 +27,14 @@ export function useSession() {
     catch { setRole("unreachable"); }
   }
   React.useEffect(() => { refreshRole(); }, [tenant, token]);
+  // Bank/exchange embedding convenience: `?tenant=bank-a` prefills the tenant
+  // field only. Authorization still derives from the bearer token server-side.
+  React.useEffect(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get("tenant") ?? "";
+      if (/^[a-zA-Z0-9][a-zA-Z0-9-_]{0,63}$/.test(t)) setTenant(t);
+    } catch { /* ignore */ }
+  }, []);
   return {
     modal, tenant, setTenant, token, role, refreshRole,
     tokenInput, setTokenInput,

@@ -113,3 +113,14 @@ None of these is implemented by this plan; the UI works fully without them.
 - P1: charts with data-table fallbacks, confirm dialogs on all money actions,
   empty/error/skeleton states everywhere, keyboard shortcuts.
 - P2: backend gaps from §7 (needs approval), e2e against live dev backend, perf pass.
+
+## 10. Session 2026-11-02 — professional redesign + integration package (implemented)
+- Shared workspace system `src/components/workspace.tsx`: `WorkspaceHeader` (eyebrow/title/
+  status strip), icon `SectionNav`, `KpiCard`/`KpiGrid`, `SectionCard`, `StatusTimeline`,
+  `AccessGate`, `TenantRoleStrip`. Banking: 8 sections incl. **Approvals** (backend intents
+  list/detail/step-up approve); Operations executes via intent-create → intent-approve →
+  money call. Personal: same system, stepped Send wizard with progress rail.
+- `src/brand.ts` (`NEXT_PUBLIC_BRAND_*`), `Shell` embed mode (`?embed=1`), tenant prefill
+  (`?tenant=`), print CSS, refined institutional palette. All a11y-contract tests kept green
+  (tabs/dialog/badge/field/table/chart primitives untouched).
+- Integration: `GET /ready`, `docs/bank-integration-guide.md`, `docs/white-label-embed.md`.

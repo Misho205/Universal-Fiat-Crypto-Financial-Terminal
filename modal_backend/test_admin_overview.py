@@ -1,12 +1,20 @@
 """Admin overview endpoint: admin-only, tenant-scoped, no secret leakage."""
+import pytest
 from fastapi.testclient import TestClient
 
-from modal_backend import store
+from modal_backend import config, store
 from modal_backend.api import app
 
 T = "admin-ov-tenant"
 OP = {"X-Tenant-Id": T, "Authorization": "Bearer dev-shared-token"}
 AD = {"X-Tenant-Id": T, "Authorization": "Bearer dev-admin-token"}
+
+
+@pytest.fixture(autouse=True)
+def _tokens(monkeypatch):
+    monkeypatch.setattr(config, "API_SHARED_TOKEN", "dev-shared-token")
+    monkeypatch.setattr(config, "API_ADMIN_TOKEN", "dev-admin-token")
+    yield
 
 
 def _client() -> TestClient:

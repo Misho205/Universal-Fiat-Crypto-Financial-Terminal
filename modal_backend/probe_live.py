@@ -165,6 +165,57 @@ def main() -> int:
     s, b = call("GET", "/api/admin/overview")
     check("GET /api/admin/overview (admin-only)", s in (200, 401, 403), f"{s}")
 
+    s, b = call("GET", "/api/ai/policy")
+    check("GET /api/ai/policy", s == 200 and "allowedTools" in b, f"{s}")
+    s, b = call("POST", "/api/ai/decision", {"kind": "fraud", "output": {}})
+    check("POST /api/ai/decision", s in (200, 401, 403) and ("requiresHumanReview" in b or s != 200), f"{s}")
+    s, b = call("GET", "/api/approvals/intents")
+    check("GET /api/approvals/intents", s in (200, 401, 403), f"{s}")
+    import uuid as _uuid
+    _iid = f"probe-{_uuid.uuid4().hex[:8]}"
+    s, b = call("POST", "/api/approvals/intents",
+                {"action": "fiat.refund", "targetId": "probe", "amountMinor": "10",
+                 "maker": "probe", "reason": "probe"},
+                extra_headers={"Idempotency-Key": _iid})
+    check("POST /api/approvals/intents", s in (201, 401, 403), f"{s}")
+    if s == 201:
+        import json as _js2
+        try:
+            _got = _js2.loads(b).get("intentId", "")
+        except Exception:
+            _got = ""
+        if _got:
+            s2, _ = call("GET", f"/api/approvals/intents/{_got}")
+            check("GET /api/approvals/intents/{intent_id}", s2 in (200, 401, 403, 404), f"{s2}")
+            s3, _ = call("POST", f"/api/approvals/intents/{_got}/approve",
+                         {"checker": "probe-qa", "confirm": True, "reason": "probe"},
+                         extra_headers={"Idempotency-Key": _iid + "-ap"})
+            check("POST /api/approvals/intents/{intent_id}/approve", s3 in (200, 401, 403, 409), f"{s3}")
+    s, _ = call("GET", "/api/admin/ai/audit")
+    check("GET /api/admin/ai/audit (admin-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("POST", "/api/admin/ai/kill-switch", {"disabled": False})
+    check("POST /api/admin/ai/kill-switch (admin-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("POST", "/api/admin/elevation",
+                {"actor": "probe", "scopes": ["fiat.refund"], "purpose": "probe", "ttlSec": 60})
+    check("POST /api/admin/elevation (admin-only)", s in (201, 401, 403, 422), f"{s}")
+    s, _ = call("GET", "/api/admin/grants?actor=probe")
+    check("GET /api/admin/grants (admin-only)", s in (200, 401, 403, 422), f"{s}")
+    s, b = call("POST", "/api/admin/emergency",
+                {"actor": "probe", "justification": "probe drill", "ttlSec": 60})
+    check("POST /api/admin/emergency (admin-only)", s in (201, 401, 403, 422), f"{s}")
+    try:
+        _em = _js2.loads(b).get("emergencyId", "") if s == 201 else ""
+    except Exception:
+        _em = ""
+    if _em:
+        s, _ = call("POST", f"/api/admin/emergency/{_em}/review",
+                    {"actor": "probe-reviewer", "role": "auditor"})
+        check("POST /api/admin/emergency/{emergency_id}/review", s in (200, 401, 403), f"{s}")
+    s, _ = call("GET", "/api/admin/audit")
+    check("GET /api/admin/audit (admin-only)", s in (200, 401, 403), f"{s}")
+    s, b = call("GET", "/ready")
+    check("GET /ready", s in (200, 503) and '"checks"' in b, f"{s}")
+
     for path, payload in [
         ("/api/ai/analyze", {"order": {}, "text": "hi"}),
         ("/api/ai/explain-transaction", {"transaction": {"amountMinor": "100"}}),

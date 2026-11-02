@@ -1,5 +1,5 @@
 "use client";
-import { User } from "lucide-react";
+import { ArrowUpRight, CalendarClock, History, Home, Inbox, Settings as SettingsIcon, Bot, Wallet } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { friendlyError, type ModalBackendClient } from "@hybridpay/sdk";
@@ -10,14 +10,22 @@ import { useSession } from "../../src/components/session";
 import { usePolling, TERMINAL_STATES } from "../../src/lib/polling";
 import { Alert, EmptyState } from "../../src/components/ui/feedback";
 import { Button } from "../../src/components/ui/button";
-import { Card, CardTitle } from "../../src/components/ui/card";
 import { Field, Input, Select, Textarea } from "../../src/components/ui/field";
-import { Money } from "../../src/components/ui/money";
 import { StatusBadge } from "../../src/components/ui/badge";
-import { Tabs } from "../../src/components/ui/tabs";
 import { FIAT_CURRENCIES } from "../../src/currencies";
+import { EnvBadge, KpiCard, KpiGrid, SectionCard, SectionNav, TenantRoleStrip, WorkspaceHeader } from "../../src/components/workspace";
 
 type View = "dash" | "send" | "receive" | "program" | "assistant" | "history" | "settings";
+
+const SECTIONS = [
+  { id: "dash", label: "Dashboard", icon: Home },
+  { id: "send", label: "Send", icon: ArrowUpRight },
+  { id: "receive", label: "Receive", icon: Inbox },
+  { id: "program", label: "Scheduled", icon: CalendarClock },
+  { id: "assistant", label: "Assistant", icon: Bot },
+  { id: "history", label: "History", icon: History },
+  { id: "settings", label: "Settings", icon: SettingsIcon },
+];
 
 export default function PersonalPage() {
   const [locale] = React.useState<"bg" | "en">("en");
@@ -27,33 +35,32 @@ export default function PersonalPage() {
 
   return (
     <Shell locale={locale} role={s.role}>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="flex items-center gap-2 text-2xl font-extrabold"><User aria-hidden /> {t("Личен портфейл", "Personal Wallet")}</h1>
-        <span className="rounded-full bg-[rgb(var(--info-bg))] px-2.5 py-0.5 text-xs font-bold text-[rgb(var(--info))]">SANDBOX</span>
-      </div>
-      <p className="muted mb-2">{t("Плащайте и следете вашата активност — само вашите данни, без реални пари.", "Pay and track your activity — only your data, no real money.")}</p>
+      <WorkspaceHeader
+        eyebrow={t("Личен портфейл", "Personal wallet")}
+        title={t("Личен портфейл", "Personal Workspace")}
+        description={t("Плащайте и следете вашата активност — само вашите данни, без реални пари.",
+          "Pay and track your activity — only your data, no real money.")}
+        badge={<EnvBadge tone="sandbox">SANDBOX</EnvBadge>}
+        status={{ tenant: s.tenant, role: s.role, backend: "modal sandbox" }}
+      />
+      <SectionNav label="Personal sections" sections={SECTIONS} value={view} onChange={(v) => setView(v as View)} />
+      <TenantRoleStrip tenant={s.tenant} role={s.role} isAdmin={s.role === "admin"} />
 
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="text-sm font-semibold">{t("Тенант", "Tenant")}: <input value={s.tenant} onChange={(e) => s.setTenant(e.target.value)} autoComplete="off" className="rounded-[10px] border border-line bg-surface px-3 py-2" /></label>
         <Link className="text-sm underline" href="/#order">{t("QR каса (терминал) →", "QR checkout (terminal) →")}</Link>
       </div>
 
-      <Tabs label="personal views" value={view} onChange={(v) => setView(v as View)} tabs={[
-        { id: "dash", label: t("1 Табло", "1 Dashboard") },
-        { id: "send", label: t("2 Изпрати", "2 Send") },
-        { id: "receive", label: t("3 Получи", "3 Receive") },
-        { id: "program", label: t("4 Условни", "4 Scheduled") },
-        { id: "assistant", label: t("5 Асистент", "5 Assistant") },
-        { id: "history", label: t("6 История", "6 History") },
-        { id: "settings", label: t("7 Настройки", "7 Settings") },
-      ]} />
-
-      <div className="mt-4">
+      <div>
         {view === "dash" && <PersonalDash modal={s.modal} locale={locale} />}
         {view === "send" && <SendWizard modal={s.modal} locale={locale} />}
         {view === "receive" && <ReceivePanel modal={s.modal} locale={locale} />}
         {view === "program" && <ProgramWizard modal={s.modal} locale={locale} />}
-        {view === "assistant" && <Card><AssistantPanel modal={s.modal} locale={locale} /></Card>}
+        {view === "assistant" && (
+          <SectionCard title="Assistant (advisory)" hint="Explanations only — never moves funds.">
+            <AssistantPanel modal={s.modal} locale={locale} />
+          </SectionCard>
+        )}
         {view === "history" && <HistoryPanel modal={s.modal} locale={locale} />}
         {view === "settings" && <SettingsPanel onSign={s.signIn} onLogout={s.logout} role={s.role} locale={locale} />}
       </div>
@@ -74,30 +81,24 @@ function PersonalDash({ modal, locale }: { modal: ModalBackendClient; locale: "b
   const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
   if (err) return <Alert tone="danger">{err}</Alert>;
   if (!sum) return <p>{t("Зарежда…", "Loading…")}</p>;
-  const cards = [
-    { label: t("Моите фиат плащания", "My fiat payments"), value: sum.fiat.total },
-    { label: t("Моите крипто плащания", "My crypto payments"), value: sum.evm.total },
-    { label: t("Моите условни плащания", "My scheduled payments"), value: sum.agreements.total },
-  ];
   return (
     <div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {cards.map((c) => (
-          <Card key={c.label}><CardTitle>{c.label}</CardTitle><p className="num text-3xl font-extrabold">{c.value}</p></Card>
-        ))}
-      </div>
-      <Card>
-        <CardTitle>{t("Какво можете да правите", "What you can do")}</CardTitle>
+      <KpiGrid>
+        <KpiCard label={t("Моите фиат плащания", "My fiat payments")} value={sum.fiat.total} icon={Wallet} />
+        <KpiCard label={t("Моите крипто плащания", "My crypto payments")} value={sum.evm.total} icon={Wallet} tone="info" />
+        <KpiCard label={t("Моите условни плащания", "My scheduled payments")} value={sum.agreements.total} icon={CalendarClock} tone="ok" />
+        <KpiCard label={t("Общо записа", "Total records")} value={sum.fiat.total + sum.evm.total + sum.agreements.total} sub={t("само вашият тенант", "your tenant only")} />
+      </KpiGrid>
+      <SectionCard title={t("Какво можете да правите", "What you can do")}>
         <ul className="list-disc space-y-1 pl-5 text-sm">
           <li>{t("Изпратете тестово плащане (стъпка по стъпка).", "Send a trial payment (step by step).")}</li>
           <li>{t("Създайте заявка за получаване и я споделете.", "Create a receive request and share it.")}</li>
           <li>{t("Направете условно плащане с обикновени думи.", "Make a conditional payment in plain words.")}</li>
         </ul>
-      </Card>
-      <Card>
-        <CardTitle>{t("Последна активност", "Recent activity")}</CardTitle>
+      </SectionCard>
+      <SectionCard title={t("Последна активност", "Recent activity")}>
         <DashboardPanel modal={modal} locale={locale} />
-      </Card>
+      </SectionCard>
     </div>
   );
 }
@@ -113,7 +114,13 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
   const [out, setOut] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const t = (bg: string, en: string) => en;
-  const steps = ["1 Recipient", "2 Method", "3 Amount", "4 Review", "5 Status"];
+  const steps = [
+    { title: "Recipient", hint: "Who gets paid" },
+    { title: "Method", hint: "Fiat or crypto" },
+    { title: "Amount", hint: "Minor units" },
+    { title: "Review", hint: "Check everything" },
+    { title: "Status", hint: "Result" },
+  ];
 
   function fieldError(): string {
     if (step === 0 && !to.trim()) return "Recipient is required.";
@@ -149,12 +156,14 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
   }
 
   return (
-    <Card>
-      <CardTitle>Send payment (testnet/sandbox)</CardTitle>
-      <ol className="mb-3 flex flex-wrap gap-2" aria-label="Steps">
+    <SectionCard title="Send payment (testnet/sandbox)"
+      hint="Sandbox and testnet only — no real money moves.">
+      <ol className="stepper" aria-label="Send progress">
         {steps.map((s, i) => (
-          <li key={s} aria-current={i === step ? "step" : undefined}
-            className={`rounded-full px-3 py-1 text-xs font-bold ${i === step ? "bg-brand-900 text-white dark:bg-brand-100" : "border border-line"}`}>{s}</li>
+          <li key={s.title} aria-current={i === step ? "step" : undefined}
+            className={i === step ? "step-now" : i < step ? "step-done" : ""}>
+            {i + 1}. {s.title}<small>{s.hint}</small>
+          </li>
         ))}
       </ol>
       {step === 0 && <Field label="Recipient (name or label)" error={!to.trim() && out ? out : ""}><Input value={to} onChange={(e) => { setTo(e.target.value); setOut(""); }} autoComplete="off" /></Field>}
@@ -191,7 +200,7 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
         {step === 3 && <Button disabled={busy} onClick={confirm}>{busy ? "Sending…" : "Confirm & send"}</Button>}
         {step === 4 && <Button variant="secondary" onClick={() => { setStep(0); setOut(""); }}>New payment</Button>}
       </div>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -206,7 +215,7 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
   async function create() {
     setBusy(true); setOut("");
     try {
-      const r = await modal.evmRequest({ to, valueWei: "1000000000000000", chainId: 11155111 }, `ui-recv-${Date.now()}`);
+      const r = await modal.evmRequest({ to, valueWei: "1000000000000000000", chainId: 11155111 }, `ui-recv-${Date.now()}`);
       const d = r.data as { paymentId: string; to: string; valueWei: string; explorerBase: string };
       setPid(d.paymentId);
       setOut(`${t("Споделете", "Share")}: paymentId=${d.paymentId} → ${d.to} (${d.valueWei} wei, Sepolia)\nExplorer: ${d.explorerBase}… (hash идва след подписване в портфейла)`);
@@ -227,11 +236,10 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
     return r.data as { state: string; confirmations: number; confirmationsRequired: number; txHash: string; explorer: string | null };
   }, { enabled: !!pid && auto, isTerminal: (v) => !!v && TERMINAL_STATES.evm.has(v.state) });
   return (
-    <Card>
-      <CardTitle>{t("Получи плащане (Sepolia заявка)", "Receive payment (Sepolia request)")}</CardTitle>
-      <p className="muted mb-2 text-sm">{t("Създава проследима Sepolia заявка. Подписването става във ВАШИЯ портфейл — ние не искаме seed/ключове.", "Creates a tracked Sepolia request. Signing happens in YOUR wallet — we never ask for seeds/keys.")}</p>
+    <SectionCard title={t("Получи плащане (Sepolia заявка)", "Receive payment (Sepolia request)")}
+      hint={t("Създава проследима Sepolia заявка. Подписването става във ВАШИЯ портфейл — ние не искаме seed/ключове.", "Creates a tracked Sepolia request. Signing happens in YOUR wallet — we never ask for seeds/keys.")}>
       <Field label={t("Ваш Sepolia адрес (0x…)", "Your Sepolia address (0x…)")}><Input value={to} onChange={(e) => setTo(e.target.value)} /></Field>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={create}>{t("Създай заявка", "Create request")}</Button>
         <Button variant="secondary" disabled={!pid} onClick={track}>{t("Проследи", "Track")}</Button>
         <label className="flex items-center gap-1 text-sm">
@@ -248,7 +256,7 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
       {live.error && <p className="mt-1 text-sm text-[rgb(var(--danger))]">{live.error} <button className="underline" onClick={live.reset}>{t("Опитай отново", "Retry")}</button></p>}
       {out && <pre className="ok mt-2">{out}</pre>}
       <p className="muted mt-2 text-xs">{t("Фиат заявките не са налични като backend примитив (виж пропуските) — ползвайте EVM заявка или QR касата.", "Fiat requests are not a backend primitive (see gaps) — use an EVM request or the QR checkout.")}</p>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -300,8 +308,8 @@ function ProgramWizard({ modal, locale }: { modal: ModalBackendClient; locale: "
     } catch (e) { setOut(friendlyError(e, locale)); }
   }
   return (
-    <Card>
-      <CardTitle>{t("Условно плащане с обикновени думи", "Conditional payment in plain words")}</CardTitle>
+    <SectionCard title={t("Условно плащане с обикновени думи", "Conditional payment in plain words")}
+      hint={t("Договорът е инструкция, не ескроу — изпълнението иска отделен човешки executor.", "The agreement is an instruction set, not escrow — execution needs a separate human executor.")}>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         <Field label={t("Сума (minor)", "Amount (minor)")}><Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="numeric" /></Field>
         <Field label={t("Друга страна", "Other party")}><Input value={other} onChange={(e) => setOther(e.target.value)} /></Field>
@@ -315,12 +323,12 @@ function ProgramWizard({ modal, locale }: { modal: ModalBackendClient; locale: "
         <Field label={t("Валидно до", "Valid until")}><Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} /></Field>
       </div>
       <Alert tone="info" className="my-2">{humanTerms()}</Alert>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={create}>{t("Създай и активирай", "Create & activate")}</Button>
         <Button variant="secondary" disabled={!agId} onClick={check}>{t("Провери състояние", "Check status")}</Button>
       </div>
       {out && <pre className="ok mt-2">{out}</pre>}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -352,13 +360,15 @@ function HistoryPanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
     URL.revokeObjectURL(a.href);
   }
   return (
-    <Card>
-      <CardTitle>{t("История", "History")}</CardTitle>
-      <div className="mb-2 flex flex-wrap gap-2">
-        <Select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="kind">
-          {["all", "fiat", "evm", "agreement"].map((k) => <option key={k} value={k}>{k}</option>)}
-        </Select>
-        <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="search by id/ref…" aria-label="search" />
+    <SectionCard title={t("История", "History")}
+      hint={t("Търсене по id/референция; квитанцията е JSON за изтегляне.", "Search by id/reference; the receipt downloads as JSON.")}>
+      <div className="ws-toolbar" role="search">
+        <Field label="Kind">
+          <Select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="kind">
+            {["all", "fiat", "evm", "agreement"].map((k) => <option key={k} value={k}>{k}</option>)}
+          </Select>
+        </Field>
+        <Field label="Search"><Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="search by id/ref…" aria-label="search" /></Field>
         <Button variant="secondary" onClick={() => { setPage(0); search(0); }}>Search</Button>
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
@@ -373,21 +383,24 @@ function HistoryPanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
             <div className="flex flex-wrap items-center gap-2">
               <code className="num text-xs">{i.id}</code>
               <span className="text-xs">[{i.kind}] {i.state}</span>
-              <Button size="sm" variant="secondary" onClick={async () => {
-                try {
-                  if (i.kind === "fiat") setDetail(JSON.stringify((await modal.fiatGet(i.id)).data, null, 2));
-                  else if (i.kind === "evm") setDetail(JSON.stringify((await modal.evmStatus(i.id)).data, null, 2));
-                  else setDetail(JSON.stringify((await modal.pagGet(i.id)).data, null, 2).slice(0, 2000));
-                } catch (e) { setDetail(friendlyError(e, locale)); }
-              }}>{t("Детайл", "Details")}</Button>
-              <Button size="sm" variant="secondary" onClick={() => download(i)}>{t("Квитанция (JSON)", "Receipt (JSON)")}</Button>
+              <StatusBadge state={i.state} />
+              <span className="ml-auto flex gap-2">
+                <Button size="sm" variant="secondary" onClick={async () => {
+                  try {
+                    if (i.kind === "fiat") setDetail(JSON.stringify((await modal.fiatGet(i.id)).data, null, 2));
+                    else if (i.kind === "evm") setDetail(JSON.stringify((await modal.evmStatus(i.id)).data, null, 2));
+                    else setDetail(JSON.stringify((await modal.pagGet(i.id)).data, null, 2).slice(0, 2000));
+                  } catch (e) { setDetail(friendlyError(e, locale)); }
+                }}>{t("Детайл", "Details")}</Button>
+                <Button size="sm" variant="secondary" onClick={() => download(i)}>{t("Квитанция (JSON)", "Receipt (JSON)")}</Button>
+              </span>
             </div>
             <p className="mt-1 text-xs text-muted">{i.detail}</p>
           </li>
         ))}
       </ul>
       {detail && <pre className="ok mt-2">{detail}</pre>}
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -410,13 +423,10 @@ function SettingsPanel({ onSign, onLogout, role, locale }: {
   }
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <Card>
-        <CardTitle>{t("Профил", "Profile")}</CardTitle>
-        <p className="muted mb-2 text-xs">{t("Само в тази сесия — не се съхранява на сървъра.", "Session only — never stored on the server.")}</p>
+      <SectionCard title={t("Профил", "Profile")} hint={t("Само в тази сесия — не се съхранява на сървъра.", "Session only — never stored on the server.")}>
         <Field label={t("Показвано име", "Display name")}><Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Field>
-      </Card>
-      <Card>
-        <CardTitle>{t("Сигурност", "Security")}</CardTitle>
+      </SectionCard>
+      <SectionCard title={t("Сигурност", "Security")}>
         <p className="text-sm">{t("Роля", "Role")}: <code>{role}</code></p>
         <div className="mt-2 flex gap-2">
           <Input type="password" value={tok} onChange={(e) => setTok(e.target.value)} placeholder="API token" aria-label="API token" />
@@ -424,22 +434,20 @@ function SettingsPanel({ onSign, onLogout, role, locale }: {
           <Button size="sm" variant="secondary" onClick={onLogout}>{t("Изход", "Log out")}</Button>
         </div>
         <p className="muted mt-2 text-xs">{t("Токенът живее само в паметта. Изходът го изтрива.", "Token lives in memory only. Logging out erases it.")}</p>
-      </Card>
-      <Card>
-        <CardTitle>{t("Свързани портфейли", "Connected wallets")}</CardTitle>
+      </SectionCard>
+      <SectionCard title={t("Свързани портфейли", "Connected wallets")}>
         {wallet && wallet !== "NO_WALLET" && wallet !== "DENIED"
           ? <p className="text-sm"><code>{wallet}</code> <Button size="sm" variant="secondary" onClick={() => setWallet("")}>{t("Разкачи", "Disconnect")}</Button></p>
           : <Button size="sm" onClick={connectWallet}>{t("Свържи портфейл", "Connect wallet")}</Button>}
         {wallet === "NO_WALLET" && <p className="mt-1 text-sm">{t("Няма портфейл — инсталирайте MetaMask.", "No wallet — install MetaMask.")}</p>}
         <p className="muted mt-2 text-xs">{t("Никога не споделяйте seed фраза или частни ключове. Подписвате само в портфейла.", "Never share seed phrases or private keys. You sign only in the wallet.")}</p>
-      </Card>
-      <Card>
-        <CardTitle>{t("Известия", "Notifications")}</CardTitle>
+      </SectionCard>
+      <SectionCard title={t("Известия", "Notifications")}>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={notif} onChange={(e) => setNotif(e.target.checked)} />
           {t("Показвай статус съобщения (само в тази сесия)", "Show status messages (this session only)")}
         </label>
-      </Card>
+      </SectionCard>
     </div>
   );
 }

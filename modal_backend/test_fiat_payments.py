@@ -26,6 +26,7 @@ AH = {**TID, "Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 def _admin(monkeypatch):
     import modal_backend.config as cfg
+    monkeypatch.setattr(cfg, "API_SHARED_TOKEN", "dev-shared-token")
     monkeypatch.setattr(cfg, "API_ADMIN_TOKEN", ADMIN_TOKEN)
 
 
@@ -167,16 +168,16 @@ def test_records_persist_durably(tmp_path, monkeypatch):
     f = tmp_path / "persist.db"
     monkeypatch.delenv("HYBRIDPAY_DB_MEMORY", raising=False)
     monkeypatch.setenv("HYBRIDPAY_DB_PATH", str(f))
-    dbmod._conn = None  # force reconnect to the file path
+    dbmod._sqlite_conn = None  # force reconnect to the file path
     c = _client()
     r = _create(c, ins="persist-1", key="kpersist")
     pid = r.json()["paymentId"]
     assert f.exists()  # sqlite file created outside the container memory
     # simulate process restart: drop connection, reconnect, record still there
-    if dbmod._conn:
-        dbmod._conn.close()
-    dbmod._conn = None
+    if dbmod._sqlite_conn:
+        dbmod._sqlite_conn.close()
+    dbmod._sqlite_conn = None
     got = dbmod.tx_get(pid, TENANT)
     assert got is not None and got["id"] == pid
-    dbmod._conn = None
+    dbmod._sqlite_conn = None
     monkeypatch.delenv("HYBRIDPAY_DB_PATH", raising=False)

@@ -20,6 +20,7 @@ AH = {"X-Tenant-Id": TENANT, "Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 def _admin(monkeypatch):
     import modal_backend.config as cfg
+    monkeypatch.setattr(cfg, "API_SHARED_TOKEN", "dev-shared-token")
     monkeypatch.setattr(cfg, "API_ADMIN_TOKEN", ADMIN_TOKEN)
 
 TERMS = {"amountMinor": "2599", "currency": "EUR",

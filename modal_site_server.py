@@ -39,7 +39,12 @@ class Handler(BaseHTTPRequestHandler):
         rel = urllib.parse.unquote(urllib.parse.urlparse(path).path.lstrip("/"))
         if not rel:
             rel = "index.html"
-        full = os.path.join(SITE_ROOT, rel)
+        # Path-traversal guard: normalize and confine to SITE_ROOT.
+        full = os.path.normpath(os.path.join(SITE_ROOT, rel))
+        root = os.path.normpath(SITE_ROOT)
+        if full != root and not full.startswith(root + os.sep):
+            self._send(403, b'{"detail":"forbidden"}', "application/json")
+            return
         if os.path.isdir(full):
             full = os.path.join(full, "index.html")
         if not os.path.isfile(full):

@@ -11,7 +11,8 @@ NOT deployed (local only, pending explicit approval): everything after 9b5971b �
 tenant binding, SDK validation + modal-schema, polling lib, probe_live 46 checks,
 pagination (backend + UI), English-only UI, idempotent cancel/refund, reconcile runs,
 server CSV export, webhook test-trigger, per-tenant AI usage, admin overview,
-a11y contract tests, load probe (see CHANGELOG + `git log --oneline`).
+a11y contract tests, load probe, AI + institutional guardrails (see CHANGELOG +
+`git log --oneline`).
 
 ## 1. Modal startup failure — reproduction & fix
 - **Reproduce**: `modal serve modal_backend/app.py` — image builds (fastapi/httpx/pydantic/stripe/uvicorn),
@@ -29,7 +30,7 @@ a11y contract tests, load probe (see CHANGELOG + `git log --oneline`).
     `modal.Secret.from_name("hybridpay-test")` — verified present (`modal secret list`).
   - Import check: `python -c "import modal_backend.app; import modal_backend.api"` → OK, 13 routes.
 - **Verify**: `API_SHARED_TOKEN=dev-shared-token uvicorn modal_backend.api:app --port 8123` →
-  `GET /health` → `{"ok":true,"liveMode":"OFF","sandbox":true}`; `pytest modal_backend/` → **25 passed, 1 skipped**.
+  `GET /health` → `{"ok":true,"liveMode":"OFF","sandbox":true}`; `pytest modal_backend/` → **101 passed, 4 skipped** (Dec 2026: +35 AI/institutional guardrail tests).
   Dev serve not left running (operator step; needs `modal token` on their machine).
 
 ## 2. Requirement audit (fiat / crypto / contracts / AI / frontend / db / auth / deploy)

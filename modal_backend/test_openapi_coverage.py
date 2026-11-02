@@ -57,6 +57,19 @@ SDK_HINTS = {
     "/api/dashboard/export": ["/api/dashboard/export"],
     "/api/webhooks/stripe/test": ["/api/webhooks/stripe/test"],
     "/api/admin/overview": ["/api/admin/overview"],
+    "/api/ai/policy": ["/api/ai/policy"],
+    "/api/ai/decision": ["/api/ai/decision"],
+    "/api/admin/ai/kill-switch": ["/api/admin/ai/kill-switch"],
+    "/api/admin/ai/audit": ["/api/admin/ai/audit"],
+    "/api/approvals/intents": ["/api/approvals/intents"],
+    "/api/approvals/intents/{intent_id}": ["encodeURIComponent(intentId)"],
+    "/api/approvals/intents/{intent_id}/approve": ["/approve"],
+    "/api/admin/elevation": ["/api/admin/elevation"],
+    "/api/admin/grants": ["/api/admin/grants"],
+    "/api/admin/emergency": ["/api/admin/emergency"],
+    "/api/admin/emergency/{emergency_id}/review": ["emergencyReview"],
+    "/api/admin/audit": ["/api/admin/audit"],
+    "/ready": ["/api/ready", "/ready"],
 }
 
 # snapshot path -> token that must appear in probe_live.py. Parameterized paths
@@ -78,6 +91,9 @@ PROBE_HINTS = {
     "/api/contracts/programmable/{agreement_id}/execute": ["/execute"],
     "/api/contracts/programmable/{agreement_id}/cancel": ["programmable", "/cancel"],
     "/api/contracts/programmable/{agreement_id}/dispute": ["/dispute"],
+    "/api/approvals/intents/{intent_id}": ["/api/approvals/intents/"],
+    "/api/approvals/intents/{intent_id}/approve": ["/approve"],
+    "/api/admin/emergency/{emergency_id}/review": ["/review"],
 }
 
 
@@ -86,7 +102,7 @@ def _all_paths() -> set[str]:
 
 
 def test_snapshot_matches_live_count():
-    assert len(_all_paths()) == 40, f"snapshot drift: {len(_all_paths())} paths"
+    assert len(_all_paths()) == 53, f"snapshot drift: {len(_all_paths())} paths"
 
 
 def test_every_path_exercised_by_probe():

@@ -212,7 +212,9 @@ def reset_for_tests() -> None:
         conn = _sqlite()
         with _lock:
             for table in ("transactions", "idempotency", "evm_payments",
-                          "contract_agreements", "schema_migrations"):
+                          "contract_agreements", "approval_intents",
+                          "elevation_grants", "emergency_access",
+                          "security_audit", "schema_migrations"):
                 try:
                     conn.execute(f"DELETE FROM {table}")
                 except Exception:
@@ -221,7 +223,9 @@ def reset_for_tests() -> None:
         migrate()
         return
     # postgres test database: clear rows only
-    for table in ("transactions", "idempotency", "evm_payments", "contract_agreements"):
+    for table in ("transactions", "idempotency", "evm_payments", "contract_agreements",
+                  "approval_intents", "elevation_grants", "emergency_access",
+                  "security_audit"):
         _exec_write(f"DELETE FROM {table}")
 
 
@@ -382,3 +386,152 @@ def pag_list(tenant: str, limit: int = 50, offset: int = 0,
         out.append({"id": d["id"], "state": d["state"], "version": d.get("version", 1),
                     "updatedAt": d.get("updatedAt", "")})
     return out
+
+
+# ---------- institutional guardrails (approvals, JIT grants, emergency, audit) ----------
+
+def intent_put(doc: dict[str, Any]) -> None:
+    if not doc.get("id") or not doc.get("tenant") or not doc.get("action"):
+        raise ValueError("intent_put: id, tenant and action are required")
+    now = int(time.time())
+    _exec_write(
+        """INSERT INTO approval_intents(id,tenant,action,target_id,amount_minor,maker,
+             maker_key,reason,state,approvals_json,quorum,expires_at,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET state=excluded.state,
+             approvals_json=excluded.approvals_json, updated_at=excluded.updated_at""",
+        (doc["id"], doc["tenant"], doc["action"], doc.get("targetId", ""),
+         str(doc.get("amountMinor", "0")), doc.get("maker", ""), doc.get("makerKey", ""),
+         str(doc.get("reason", ""))[:500], doc.get("state", "pending"),
+         json.dumps(doc.get("approvals", [])), int(doc.get("quorum", 1)),
+         int(doc.get("expiresAt", 0)), int(doc.get("createdAt", now)), now),
+    )
+
+
+def intent_get(intent_id: str, tenant: str) -> dict[str, Any] | None:
+    row = _fetch_one("SELECT * FROM approval_intents WHERE id=? AND tenant=?", (intent_id, tenant))
+    if not row:
+        return None
+    return {"id": row["id"], "tenant": row["tenant"], "action": row["action"],
+            "targetId": row["target_id"], "amountMinor": row["amount_minor"],
+            "maker": row["maker"], "makerKey": row["maker_key"], "reason": row["reason"],
+            "state": row["state"], "approvals": json.loads(row["approvals_json"] or "[]"),
+            "quorum": row["quorum"], "expiresAt": row["expires_at"]}
+
+
+def intent_list(tenant: str, limit: int = 50, state: str = "") -> list[dict[str, Any]]:
+    lim = max(1, min(limit, 200))
+    if state:
+        rows = _fetch_all("SELECT * FROM approval_intents WHERE tenant=? AND state=? "
+                          "ORDER BY created_at DESC LIMIT ?", (tenant, state, lim))
+    else:
+        rows = _fetch_all("SELECT * FROM approval_intents WHERE tenant=? "
+                          "ORDER BY created_at DESC LIMIT ?", (tenant, lim))
+    return [{"id": r["id"], "action": r["action"], "targetId": r["target_id"],
+             "state": r["state"], "maker": r["maker"], "quorum": r["quorum"],
+             "approvals": json.loads(r["approvals_json"] or "[]")} for r in rows]
+
+
+def grant_put(doc: dict[str, Any]) -> None:
+    if not doc.get("id") or not doc.get("tenant") or not doc.get("actor"):
+        raise ValueError("grant_put: id, tenant and actor are required")
+    _exec_write(
+        """INSERT INTO elevation_grants(id,tenant,actor,scopes,purpose,granted_by,
+             expires_at,state,created_at) VALUES(?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(id) DO UPDATE SET state=excluded.state""",
+        (doc["id"], doc["tenant"], doc["actor"], ",".join(doc.get("scopes", [])),
+         str(doc.get("purpose", ""))[:500], doc.get("grantedBy", ""),
+         int(doc.get("expiresAt", 0)), doc.get("state", "active"), int(time.time())),
+    )
+
+
+def active_grants(tenant: str, actor: str, now: int | None = None) -> list[dict[str, Any]]:
+    ts = now if now is not None else int(time.time())
+    rows = _fetch_all("SELECT * FROM elevation_grants WHERE tenant=? AND actor=? AND state='active'",
+                      (tenant, actor))
+    out = []
+    for r in rows:
+        if ts < int(r["expires_at"]):
+            out.append({"id": r["id"], "scopes": r["scopes"].split(",") if r["scopes"] else [],
+                        "purpose": r["purpose"], "expiresAt": r["expires_at"]})
+        else:
+            _exec_write("UPDATE elevation_grants SET state='expired' WHERE id=?", (r["id"],))
+    return out
+
+
+def emergency_put(doc: dict[str, Any]) -> None:
+    if not doc.get("id") or not doc.get("tenant") or not doc.get("actor"):
+        raise ValueError("emergency_put: id, tenant and actor are required")
+    if not str(doc.get("justification", "")).strip():
+        raise ValueError("emergency_put: justification is required")
+    _exec_write(
+        """INSERT INTO emergency_access(id,tenant,actor,justification,granted_by,
+             expires_at,reviewed,created_at) VALUES(?,?,?,?,?,?,?,?)""",
+        (doc["id"], doc["tenant"], doc["actor"], str(doc["justification"])[:1000],
+         doc.get("grantedBy", ""), int(doc.get("expiresAt", 0)), 0, int(time.time())),
+    )
+
+
+def emergency_list(tenant: str, limit: int = 50) -> list[dict[str, Any]]:
+    rows = _fetch_all("SELECT * FROM emergency_access WHERE tenant=? ORDER BY created_at DESC LIMIT ?",
+                      (tenant, max(1, min(limit, 200))))
+    return [{"id": r["id"], "actor": r["actor"], "justification": r["justification"],
+             "grantedBy": r["granted_by"], "expiresAt": r["expires_at"],
+             "reviewed": bool(r["reviewed"])} for r in rows]
+
+
+def emergency_mark_reviewed(emergency_id: str, tenant: str, reviewer: str) -> bool:
+    row = _fetch_one("SELECT * FROM emergency_access WHERE id=? AND tenant=?", (emergency_id, tenant))
+    if not row or row["actor"] == reviewer:
+        return False  # reviewer must be independent of the emergency actor
+    _exec_write("UPDATE emergency_access SET reviewed=1 WHERE id=?", (emergency_id,))
+    return True
+
+
+def audit_append(tenant: str, event: str, actor: str, detail: str) -> dict[str, Any]:
+    # Per-tenant chain: prev links the last event OF THE SAME TENANT, so one
+    # tenant's audit trail verifies independently (tenant isolation).
+    last = _fetch_one("SELECT hash FROM security_audit WHERE tenant=? ORDER BY seq DESC LIMIT 1",
+                      (tenant,))
+    prev = last["hash"] if last else "GENESIS"
+    ts = int(time.time())
+    digest = hashlib.sha256(f"{prev}|{tenant}|{event}|{actor}|{detail}|{ts}".encode()).hexdigest()
+    conn_kind = backend_kind()
+    if conn_kind == "postgres":
+        conn = _pg()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO security_audit(tenant,event,actor,detail,prev_hash,hash,created_at)"
+                            " VALUES (%s,%s,%s,%s,%s,%s,%s)", (tenant, event[:120], actor[:120],
+                            detail[:1000], prev, digest, ts))
+            conn.commit()
+        finally:
+            conn.close()
+    else:
+        _exec_write("INSERT INTO security_audit(tenant,event,actor,detail,prev_hash,hash,created_at)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    (tenant, event[:120], actor[:120], detail[:1000], prev, digest, ts))
+    return {"hash": digest, "prevHash": prev, "ts": ts}
+
+
+def audit_list(tenant: str, limit: int = 100) -> list[dict[str, Any]]:
+    rows = _fetch_all("SELECT seq,tenant,event,actor,detail,prev_hash,hash,created_at FROM security_audit "
+                      "WHERE tenant=? ORDER BY seq DESC LIMIT ?", (tenant, max(1, min(limit, 200))))
+    return [{"seq": r["seq"], "event": r["event"], "actor": r["actor"], "detail": r["detail"],
+             "prevHash": r["prev_hash"], "hash": r["hash"], "ts": r["created_at"]} for r in rows]
+
+
+def audit_verify(tenant: str) -> bool:
+    rows = _fetch_all("SELECT seq,tenant,event,actor,detail,prev_hash,hash,created_at FROM security_audit "
+                      "WHERE tenant=? ORDER BY seq ASC LIMIT 2000", (tenant,))
+    prev = "GENESIS"
+    for r in rows:
+        if r["prev_hash"] != prev:
+            return False
+        expect = hashlib.sha256(
+            f"{r['prev_hash']}|{r['tenant']}|{r['event']}|{r['actor']}|{r['detail']}|{r['created_at']}"
+            .encode()).hexdigest()
+        if expect != r["hash"]:
+            return False
+        prev = r["hash"]
+    return True

@@ -150,7 +150,6 @@ def analyze_contract(terms: dict[str, Any], tenant: str) -> dict[str, Any]:
     except MetaClientError as exc:
         log_event(logger, "ai.fallback", task="contract", code=exc.code)
         meta_client.record_usage(fallback=True, tenant=tenant)
-        meta_client.record_usage(fallback=True, tenant=tenant)
         fallback = validated(ContractAnalysis, {
             "conditionsStatus": [], "gaps": ["AI analysis unavailable."],
             "recommendation": "Proceed only via deterministic validator + human acceptance."})

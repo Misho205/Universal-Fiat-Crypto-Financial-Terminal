@@ -31,15 +31,51 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import ai, config, contracts, meta_client, payments, programmable, providers, store
+from . import ai, config, contracts, institutional, meta_client, payments, programmable, providers, store
 from . import db as _db
 from . import evm as evm_mod
-from .auth import caller_role, require_admin, require_auth, require_tenant
+from .ai_guardrails import audit as ai_audit
+from .ai_guardrails import policy as ai_policy
+from .ai_guardrails import redaction as ai_redaction
+from .auth import caller_role, require_admin, require_auth, require_tenant, role_of
 from .db import tx_get as db_tx_get, tx_list as db_tx_list, tx_upsert as db_tx_upsert
 from .logging_util import get_logger, log_event
 from .payments import ProviderError, get_fiat_provider, verify_stripe_webhook
 
 logger = get_logger("hybridpay.api")
+
+
+def require_ai_enabled() -> None:
+    """Kill-switch guard: 503 for model-calling AI routes only.
+
+    Payment, dashboard, and reconcile routes keep serving — the switch
+    interrupts advisory AI alone, never unrelated authorized payments.
+    """
+    disabled, why = ai_policy.is_ai_disabled()
+    if disabled:
+        raise HTTPException(status_code=503, detail=f"AI_DISABLED: {why}")
+
+
+def _strict_intent_required(*, tenant: str, action: str, target_id: str,
+                            amount_minor: str = "0") -> None:
+    """Institutional strict mode: sensitive money endpoints need an approved intent.
+
+    Default (INSTITUTIONAL_STRICT=0) preserves the legacy direct admin path so
+    existing sandbox flows keep working; production deployments set STRICT=1,
+    after which direct calls fail closed with 403 INTENT_REQUIRED and only an
+    approved multi-party intent (maker + distinct checker quorum) unlocks them.
+    """
+    if not institutional.STRICT:
+        return
+    intents = _db.intent_list(tenant)
+    for it in intents:
+        full = _db.intent_get(it["id"], tenant)
+        if (full and full["action"] == action and full["targetId"] == target_id
+                and full["state"] == "approved"):
+            return
+    _db.audit_append(tenant, f"institutional.intent.missing", "policy-engine",
+                     f"{action} {target_id} blocked: no approved intent (strict mode)")
+    raise HTTPException(status_code=403, detail="INTENT_REQUIRED: approved maker-checker intent required")
 
 app = FastAPI(title="HybridPay Modal Sandbox Backend", version="0.1.0")
 
@@ -151,6 +187,43 @@ class AiAssistantIn(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class AiDecisionIn(BaseModel):
+    kind: str = Field(min_length=1, max_length=60)
+    output: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiKillSwitchIn(BaseModel):
+    disabled: bool
+    reason: str = Field(default="", max_length=200)
+
+
+class IntentCreateIn(BaseModel):
+    action: str = Field(min_length=1, max_length=40)
+    targetId: str = Field(default="", max_length=120)
+    amountMinor: str = Field(default="0", max_length=16)
+    maker: str = Field(min_length=1, max_length=80)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class IntentApproveIn(BaseModel):
+    checker: str = Field(min_length=1, max_length=80)
+    confirm: bool = False
+    reason: str = Field(default="", max_length=500)
+
+
+class ElevationIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    scopes: list[str] = Field(default_factory=list, max_length=10)
+    purpose: str = Field(min_length=1, max_length=500)
+    ttlSec: int = Field(default=900, ge=60, le=86400)
+
+
+class EmergencyIn(BaseModel):
+    actor: str = Field(min_length=1, max_length=80)
+    justification: str = Field(min_length=1, max_length=1000)
+    ttlSec: int = Field(default=900, ge=60, le=86400)
+
+
 def _ai_or_429(fn, *args: Any) -> dict[str, Any]:
     """Run an advisory AI service; map rate limiting to HTTP 429."""
     tenant = args[-1] if args and isinstance(args[-1], str) else ""
@@ -176,6 +249,39 @@ async def health() -> dict[str, Any]:
   return {"ok": True, "liveMode": mode, "sandbox": mode != "ON-APPROVED", "ts": int(time.time())}
 
 
+@app.get("/ready")
+async def ready() -> dict[str, Any]:
+    """Readiness probe for bank/exchange orchestrators (load balancers, k8s).
+
+    Unauthenticated by design (like /health): reveals only aggregate status,
+    never secrets or tenant data. Returns 200 only when migrations are applied
+    and the durable store is reachable; otherwise 503 with the failing check.
+    """
+    checks: dict[str, Any] = {}
+    ok = True
+    try:
+        applied = _db.migrate()
+        checks["migrations"] = {"ok": True, "appliedNow": applied}
+    except Exception as exc:
+        ok = False
+        checks["migrations"] = {"ok": False, "error": str(exc)[:120]}
+    try:
+        _db.intent_list("__readiness__", limit=1)
+        checks["store"] = {"ok": True}
+    except Exception as exc:
+        ok = False
+        checks["store"] = {"ok": False, "error": str(exc)[:120]}
+    ai_off, ai_why = ai_policy.is_ai_disabled()
+    checks["ai"] = {"ok": True, "disabled": ai_off, "reason": ai_why}
+    checks["institutionalStrict"] = institutional.STRICT
+    body: dict[str, Any] = {"ok": ok, "sandbox": True,
+                            "liveMode": config.live_mode_status(),
+                            "checks": checks, "ts": int(time.time())}
+    if not ok:
+        return JSONResponse(status_code=503, content=body)
+    return body
+
+
 @app.post("/api/ai/analyze")
 async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth)) -> dict[str, Any]:
     log_event(logger, "ai.analyze", caller=caller)
@@ -189,51 +295,80 @@ async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth)) -> 
 
 @app.post("/api/ai/explain-transaction")
 async def ai_explain(body: AiTransactionIn, tenant: str = Depends(require_tenant),
-                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+                     caller: str = Depends(require_auth),
+                     _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.explain.request", caller=caller)
     return _ai_or_429(ai.explain_transaction, body.transaction, tenant)
 
 
 @app.post("/api/ai/fraud-signals")
 async def ai_fraud(body: AiTransactionIn, tenant: str = Depends(require_tenant),
-                   caller: str = Depends(require_auth)) -> dict[str, Any]:
+                   caller: str = Depends(require_auth),
+                   _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.fraud.request", caller=caller)
-    return _ai_or_429(ai.fraud_signals, body.transaction, tenant)
+    out = _ai_or_429(ai.fraud_signals, body.transaction, tenant)
+    # Deterministic gate travels WITH the advisory output: no consumer may
+    # treat it as authorization; human review is mandatory.
+    out["policyDecision"] = ai_policy.decision_from_ai("fraud", out.get("data", {}))
+    return out
 
 
 @app.post("/api/ai/routing-recommendation")
 async def ai_routing(body: AiRoutingIn, tenant: str = Depends(require_tenant),
-                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+                     caller: str = Depends(require_auth),
+                     _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.routing.request", caller=caller)
     return _ai_or_429(ai.routing_recommendation, body.context, tenant)
 
 
 @app.post("/api/ai/contract-analysis")
 async def ai_contract(body: AiContractIn, tenant: str = Depends(require_tenant),
-                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+                      caller: str = Depends(require_auth),
+                      _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.contract.request", caller=caller)
     return _ai_or_429(ai.analyze_contract, body.terms, tenant)
 
 
 @app.post("/api/ai/explain-crypto")
 async def ai_explain_crypto(body: AiCryptoIn, tenant: str = Depends(require_tenant),
-                            caller: str = Depends(require_auth)) -> dict[str, Any]:
+                            caller: str = Depends(require_auth),
+                            _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.explain-crypto.request", caller=caller)
     return _ai_or_429(ai.explain_crypto, body.transaction, tenant)
 
 
 @app.post("/api/ai/explain-state")
 async def ai_explain_state(body: AiStateIn, tenant: str = Depends(require_tenant),
-                           caller: str = Depends(require_auth)) -> dict[str, Any]:
+                           caller: str = Depends(require_auth),
+                           _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.explain-state.request", caller=caller)
     return _ai_or_429(ai.explain_agreement_state, body.model_dump(), tenant)
 
 
 @app.post("/api/ai/assistant")
 async def ai_assistant(body: AiAssistantIn, tenant: str = Depends(require_tenant),
-                       caller: str = Depends(require_auth)) -> dict[str, Any]:
+                       caller: str = Depends(require_auth),
+                       _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
     log_event(logger, "ai.assistant.request", caller=caller)
-    return _ai_or_429(ai.assistant, body.message, body.context, tenant)
+    # Zero-trust input: validate + screen for prompt injection / role spoofing
+    # BEFORE any model call. Attacks fail closed to a safe refusal.
+    try:
+        clean = ai_redaction.validate_input(body.message)
+    except ValueError as exc:
+        ai_audit.log_security_event("ai.input.rejected", tenant=tenant,
+                                    actor=caller, detail=str(exc)[:120])
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    attacked, rule = ai_redaction.detect_injection(clean + "\n" + str(body.context)[:1000])
+    if attacked:
+        ai_audit.log_security_event("ai.injection.blocked", tenant=tenant,
+                                    actor=caller, detail=rule)
+        _db.audit_append(tenant, "ai.injection.blocked", caller, rule)
+        return {"kind": "assistant",
+                "data": {"answer": "Request refused by AI safety policy.",
+                         "topic": "general", "actions": ["read-docs"], "needsHuman": True},
+                "validated": False, "model": "policy-guard", "advisoryOnly": True,
+                "notice": "Prompt-injection pattern blocked; no model call was made."}
+    return _ai_or_429(ai.assistant, clean, body.context, tenant)
 
 
 @app.get("/api/ai/usage")
@@ -447,6 +582,9 @@ async def fiat_cancel(payment_id: str, tenant: str = Depends(require_tenant),
                       caller: str = Depends(require_admin),
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
     """Admin only: cancels a non-terminal payment (money movement). Idempotent via Idempotency-Key."""
+    rec = _load_owned(payment_id, tenant)
+    _strict_intent_required(tenant=tenant, action="fiat.cancel", target_id=payment_id,
+                            amount_minor=rec.get("amountMinor", "0"))
     key = _idem_key(tenant, f"fiat-cancel:{payment_id}", idempotency_key, {"payment_id": payment_id})
     hit = store.idem_lookup(key)
     if hit:
@@ -473,13 +611,15 @@ async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends
                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
     """Admin only: refunds a succeeded payment (money movement). Idempotent via Idempotency-Key."""
     payload = {"payment_id": payment_id, **body.model_dump()}
+    rec = _load_owned(payment_id, tenant)
+    _strict_intent_required(tenant=tenant, action="fiat.refund", target_id=payment_id,
+                            amount_minor=rec.get("amountMinor", "0"))
     key = _idem_key(tenant, f"fiat-refund:{payment_id}", idempotency_key, payload)
     hit = store.idem_lookup(key)
     if hit:
         if hit["payload"] != payload:
             raise HTTPException(status_code=409, detail="IDEMPOTENCY_CONFLICT")
         return _public(hit["response"])
-    rec = _load_owned(payment_id, tenant)
     if rec["state"] != "succeeded":
         raise HTTPException(status_code=409, detail="only succeeded payments can be refunded")
     try:
@@ -774,6 +914,8 @@ async def pag_execute(agreement_id: str, body: PagActorIn, tenant: str = Depends
     ag = _load_pag(agreement_id, tenant)
     if body.role != "executor":
         raise HTTPException(status_code=403, detail="execution requires human executor authorization")
+    _strict_intent_required(tenant=tenant, action="agreement.execute", target_id=agreement_id,
+                            amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")))
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     if programmable.check_expiry(ag, now_iso):
         raise HTTPException(status_code=410, detail="agreement expired")
@@ -812,6 +954,8 @@ async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(
                      caller: str = Depends(require_admin)) -> dict[str, Any]:
     """Admin only (irreversible terminal state)."""
     ag = _load_pag(agreement_id, tenant)
+    _strict_intent_required(tenant=tenant, action="agreement.cancel", target_id=agreement_id,
+                            amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")))
     ok, why = programmable.can_transition(ag["state"], "canceled", body.role)
     if not ok:
         raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
@@ -825,6 +969,8 @@ async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends
                       caller: str = Depends(require_admin)) -> dict[str, Any]:
     """Admin only (freezes execution). Raising party identity is recorded in history."""
     ag = _load_pag(agreement_id, tenant)
+    _strict_intent_required(tenant=tenant, action="agreement.dispute", target_id=agreement_id,
+                            amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")))
     ok, why = programmable.can_transition(ag["state"], "disputed", body.role)
     if not ok:
         raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
@@ -1012,3 +1158,209 @@ async def stripe_webhook_test(tenant: str = Depends(require_tenant),
             "headers": {"stripe-signature": f"t={int(time.time())},v1={sig}"},
             "note": "Demo only. Uses TEST secret when set; the event is clearly labeled evt_test_.",
             "sandbox": True}
+
+
+# ---------- AI governance: policy transparency, deterministic gates, kill-switch ----------
+
+@app.get("/api/ai/policy")
+async def ai_policy_public() -> dict[str, Any]:
+    """Public, secret-free statement of AI capabilities and limits."""
+    return {"advisoryOnly": True, "allowedTools": list(ai_policy.ALLOWED_TOOLS),
+            "forbiddenActions": list(ai_policy.FORBIDDEN_ACTIONS),
+            "reviewRequiredKinds": list(ai_policy.REVIEW_REQUIRED_KINDS),
+            "killSwitch": {"how": "POST /api/admin/ai/kill-switch (admin) or AI_DISABLED=1",
+                           "blastRadius": "AI routes only; payments keep serving"},
+            "sandbox": True,
+            "notice": "AI output never authorizes, signs, releases, or transfers funds."}
+
+
+@app.post("/api/ai/decision")
+async def ai_decision(body: AiDecisionIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    """Deterministic policy gate over an AI output (computed by backend, not the model)."""
+    decision = ai_policy.decision_from_ai(body.kind, body.output)
+    log_event(logger, "ai.decision", tenant=tenant, caller=caller, kind=body.kind,
+              needsReview=decision["requiresHumanReview"])
+    return {**decision, "sandbox": True}
+
+
+@app.post("/api/admin/ai/kill-switch")
+async def ai_kill_switch(body: AiKillSwitchIn, tenant: str = Depends(require_tenant),
+                         caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Emergency AI disable switch. Stops /api/ai/* (503) without touching payments."""
+    state = ai_policy.set_runtime_disabled(body.disabled, body.reason)
+    ai_audit.log_security_event("ai.killswitch", tenant=tenant, actor=caller,
+                                detail=f"disabled={body.disabled} {body.reason}"[:200])
+    _db.audit_append(tenant, "ai.killswitch", caller,
+                     f"disabled={body.disabled} reason={body.reason}"[:500])
+    log_event(logger, "ai.killswitch", tenant=tenant, caller=caller, **state)
+    return {**state, "sandbox": True,
+            "note": "AI routes return 503 AI_DISABLED while engaged; payment APIs unaffected."}
+
+
+@app.get("/api/admin/ai/audit")
+async def ai_audit_list(tenant: str = Depends(require_tenant),
+                        caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Recent AI security events (hashes only, no personal data) + chain validity."""
+    events = ai_audit.recent(100)
+    return {"tenant": tenant, "sandbox": True, "chainValid": ai_audit.verify_chain(),
+            "events": events}
+
+
+# ---------- Institutional guardrails: maker-checker, JIT, emergency, audit ----------
+
+def _presented_token(authorization: str | None) -> str:
+    if authorization and authorization.startswith("Bearer "):
+        return authorization.removeprefix("Bearer ").strip()
+    return ""
+
+
+@app.post("/api/approvals/intents", status_code=201)
+async def intent_create(body: IntentCreateIn, tenant: str = Depends(require_tenant),
+                        caller: str = Depends(require_auth),
+                        authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Maker step: propose a sensitive action. Never executes anything by itself."""
+    role = role_of(authorization) or ("operator" if caller == "dev-caller" else None)
+    if role is None:
+        raise HTTPException(status_code=401, detail="invalid token")
+    ok, why = institutional.policy_decide(action=body.action, role=role, tenant=tenant,
+                                          actor=body.maker, amount_minor=body.amountMinor)
+    if not ok:
+        raise HTTPException(status_code=403, detail=why)
+    doc = {"id": institutional.new_intent_id(), "tenant": tenant, "action": body.action,
+           "targetId": body.targetId, "amountMinor": body.amountMinor or "0",
+           "maker": body.maker, "makerKey": institutional._actor_key(_presented_token(authorization), body.maker),
+           "reason": body.reason, "state": "pending", "approvals": [],
+           "quorum": institutional.required_quorum(body.amountMinor or "0"),
+           "expiresAt": int(time.time()) + 86400, "createdAt": int(time.time())}
+    _db.intent_put(doc)
+    _db.audit_append(tenant, "approval.intent.created", body.maker, f"{body.action} {body.targetId}")
+    log_event(logger, "approval.intent.created", tenant=tenant, caller=caller, action=body.action)
+    return {"intentId": doc["id"], "state": "pending", "quorum": doc["quorum"],
+            "highRisk": institutional.is_high_risk(body.amountMinor or "0"), "sandbox": True}
+
+
+@app.get("/api/approvals/intents")
+async def intent_list(tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_auth)) -> dict[str, Any]:
+    return {"intents": _db.intent_list(tenant), "sandbox": True}
+
+
+@app.get("/api/approvals/intents/{intent_id}")
+async def intent_get(intent_id: str, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth)) -> dict[str, Any]:
+    doc = _db.intent_get(intent_id, tenant)
+    if not doc:
+        raise HTTPException(status_code=404, detail="not found")
+    now = int(time.time())
+    if doc["state"] == "pending" and now >= doc["expiresAt"]:
+        doc["state"] = "expired"
+        _db.intent_put(doc)
+    return {**doc, "sandbox": True}
+
+
+@app.post("/api/approvals/intents/{intent_id}/approve")
+async def intent_approve(intent_id: str, body: IntentApproveIn,
+                         tenant: str = Depends(require_tenant),
+                         caller: str = Depends(require_admin),
+                         authorization: str | None = Header(default=None),
+                         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> dict[str, Any]:
+    """Checker step: distinct authenticated human approves. Quorum gates execution."""
+    ok, why = institutional.step_up_ok({"confirm": body.confirm, "reason": body.reason},
+                                       {"idempotency-key": idempotency_key or ""})
+    if not ok:
+        raise HTTPException(status_code=403, detail=why)
+    doc = _db.intent_get(intent_id, tenant)
+    if not doc:
+        raise HTTPException(status_code=404, detail="not found")
+    if doc["state"] != "pending":
+        raise HTTPException(status_code=409, detail=f"intent is {doc['state']}")
+    if int(time.time()) >= doc["expiresAt"]:
+        doc["state"] = "expired"
+        _db.intent_put(doc)
+        raise HTTPException(status_code=410, detail="intent expired")
+    token = _presented_token(authorization)
+    ok, why = institutional.check_no_self_approval(doc["maker"], doc.get("makerKey", ""),
+                                                  body.checker, token)
+    # makerKey binds the credential; compare credential-bound keys when available.
+    if doc.get("makerKey") and token and doc["makerKey"] == institutional._actor_key(token, doc["maker"]):
+        raise HTTPException(status_code=403, detail="DENY: self-approval forbidden (same credential)")
+    if not ok:
+        raise HTTPException(status_code=403, detail=why)
+    checker_key = institutional._actor_key(token, body.checker)
+    approvals = list(doc.get("approvals", []))
+    if checker_key not in {a.get("checkerKey") for a in approvals}:
+        approvals.append({"checker": body.checker, "checkerKey": checker_key,
+                          "reason": body.reason, "at": int(time.time())})
+    doc["approvals"] = approvals
+    if institutional.quorum_met(approvals, doc["quorum"]):
+        doc["state"] = "approved"
+    _db.intent_put(doc)
+    _db.audit_append(tenant, f"approval.intent.{doc['state']}", body.checker,
+                     f"{doc['action']} {doc['targetId']} quorum={doc['quorum']}")
+    log_event(logger, "approval.intent.approved", tenant=tenant, caller=caller, intent=intent_id)
+    return {"intentId": intent_id, "state": doc["state"], "approvals": len(approvals),
+            "quorum": doc["quorum"], "sandbox": True}
+
+
+@app.post("/api/admin/elevation", status_code=201)
+async def elevation_grant(body: ElevationIn, tenant: str = Depends(require_tenant),
+                          caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """JIT elevation: time-limited, purpose-bound grant. Expires automatically."""
+    for scope in body.scopes:
+        if scope not in institutional.SENSITIVE_ACTIONS and scope != "*":
+            raise HTTPException(status_code=422, detail=f"unknown scope {scope}")
+    doc = {"id": f"gr-{uuid.uuid4().hex[:12]}", "tenant": tenant, "actor": body.actor,
+           "scopes": body.scopes, "purpose": body.purpose, "grantedBy": caller,
+           "expiresAt": int(time.time()) + body.ttlSec, "state": "active"}
+    _db.grant_put(doc)
+    _db.audit_append(tenant, "institutional.elevation.granted", caller,
+                     f"{body.actor} scopes={','.join(body.scopes)} purpose={body.purpose}"[:500])
+    return {"grantId": doc["id"], "actor": body.actor, "expiresAt": doc["expiresAt"], "sandbox": True}
+
+
+@app.get("/api/admin/grants")
+async def elevation_list(tenant: str = Depends(require_tenant),
+                         caller: str = Depends(require_admin),
+                         actor: str = "") -> dict[str, Any]:
+    if not actor:
+        raise HTTPException(status_code=422, detail="actor query param required")
+    return {"actor": actor, "grants": _db.active_grants(tenant, actor), "sandbox": True}
+
+
+@app.post("/api/admin/emergency", status_code=201)
+async def emergency_grant(body: EmergencyIn, tenant: str = Depends(require_tenant),
+                          caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Emergency access: documented justification, short TTL, needs retrospective review."""
+    doc = {"id": f"em-{uuid.uuid4().hex[:12]}", "tenant": tenant, "actor": body.actor,
+           "justification": body.justification, "grantedBy": caller,
+           "expiresAt": int(time.time()) + body.ttlSec}
+    _db.emergency_put(doc)
+    _db.audit_append(tenant, "institutional.emergency.granted", caller,
+                     f"{body.actor}: {body.justification}"[:500])
+    log_event(logger, "institutional.emergency", tenant=tenant, caller=caller)
+    return {"emergencyId": doc["id"], "actor": body.actor, "expiresAt": doc["expiresAt"],
+            "reviewRequired": True, "sandbox": True,
+            "note": "Independent retrospective review is mandatory."}
+
+
+@app.post("/api/admin/emergency/{emergency_id}/review")
+async def emergency_review(emergency_id: str, body: PagActorIn, tenant: str = Depends(require_tenant),
+                           caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Independent retrospective review of emergency access (reviewer != actor)."""
+    if body.role not in ("auditor", "compliance", "approver", "owner"):
+        raise HTTPException(status_code=403, detail="DENY: reviewer must be auditor/compliance/approver/owner")
+    if not _db.emergency_mark_reviewed(emergency_id, tenant, body.actor):
+        raise HTTPException(status_code=403, detail="DENY: independent reviewer required")
+    _db.audit_append(tenant, "institutional.emergency.reviewed", body.actor, emergency_id)
+    return {"emergencyId": emergency_id, "reviewed": True, "reviewer": body.actor, "sandbox": True}
+
+
+@app.get("/api/admin/audit")
+async def security_audit_list(tenant: str = Depends(require_tenant),
+                              caller: str = Depends(require_admin),
+                              limit: int = 100) -> dict[str, Any]:
+    """Tamper-evident security + financial audit trail with chain verification."""
+    lim = max(1, min(limit, 200))
+    return {"tenant": tenant, "sandbox": True, "chainValid": _db.audit_verify(tenant),
+            "events": _db.audit_list(tenant, limit=lim)}

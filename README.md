@@ -16,9 +16,12 @@ for hackathon demos.
   transaction status + **AI assistant** (validated, fallback-safe, read-only), visual **simulator** (`/simulator`) for human trial tests.
   Design system (`/design-system` showcase): Tailwind + tokens, light/dark themes, shadcn-style
   components, Lucide icons, accessible charts. **Banking Workspace** (`/banking`, admin-gated:
-  overview, transactions, agreements, risk, audit, assistant) + **Personal Workspace**
-  (`/personal`: pay, my activity, assistant). Responsive (mobile/desktop), keyboard-focus visible,
+  overview, operations, contracts, **approvals (maker-checker intents)**, risk, admin, analytics, assistant) + **Personal Workspace**
+  (`/personal`: dash, send, receive, program, assistant, history, settings). Responsive (mobile/desktop), keyboard-focus visible,
   `aria-live` states, memory-only session token + role badge. Architecture: `FRONTEND_IMPLEMENTATION_PLAN.md`.
+  Embeddable (`?embed=1` chrome-less iframe) and white-labelable (`NEXT_PUBLIC_BRAND_*`,
+  CSS variables) — see `docs/white-label-embed.md`; bank/exchange onboarding in
+  `docs/bank-integration-guide.md`.
 - **NestJS API** (`apps/api`): modular monolith, system of record (PostgreSQL + Prisma migrations).
 - **Worker** (`apps/worker`): Temporal activities/workflows (provider calls live outside DB tx).
 - **Modal backend** (`modal_backend/`, FastAPI): stateless executor + **advisory AI**
@@ -32,6 +35,12 @@ for hackathon demos.
   create/activate/approve/evidence/execute/cancel/dispute with audit chain),
   durable store (SQLite on Modal Volume `/mnt/data`, or Postgres via `DATABASE_URL`;
   versioned migrations; Postgres stays system of record for Nest API).
+  Readiness probe `GET /ready` (migrations + store) for bank load-balancers;
+  AI guardrails (`modal_backend/ai_guardrails/`, default-deny policy engine,
+  allowlisted read-only tools, injection screening, kill-switch) + institutional
+  guardrails (`modal_backend/institutional.py`, maker-checker intents, quorums,
+  JIT, emergency, tamper-evident audit) — see `AI_SECURITY_POLICY.md`,
+  `AI_TOOL_PERMISSIONS.md`, `AI_RED_TEAM_TESTS.md`.
 - **Packages**: `domain` (exact money), `agreements` (DSL validator), `ledger` (balanced journal),
   `policies` (OPA), `adapters` (mock/Stripe-sandbox/BTCPay-regtest), `sdk` (typed browser client).
 
@@ -58,6 +67,9 @@ Full checklist, secrets, costs, verification, rollback, readiness: `docs/modal-d
 
 ## Docs (start here)
 - `IMPLEMENTATION_STATUS.md` — what works / what was tested / exact next steps (no invented results).
+- `docs/bank-integration-guide.md` — embed the terminal in a bank/exchange (iframe, white-label, headless API, webhooks, go-live gates).
+- `docs/white-label-embed.md` — `?embed=1`, `NEXT_PUBLIC_BRAND_*`, palette overrides.
+- `AI_SECURITY_POLICY.md`, `AI_TOOL_PERMISSIONS.md`, `AI_RED_TEAM_TESTS.md` — AI + institutional guardrails.
 - `docs/fiat-sandbox.md` — fiat E2E architecture + mocked tests + documented Stripe TEST run.
 - `docs/modal-deploy-checklist.md` — deploy procedure, verification, rollback, costs, readiness.
 - `docs/live-mode.md` — LIVE guardrails (fail-closed).

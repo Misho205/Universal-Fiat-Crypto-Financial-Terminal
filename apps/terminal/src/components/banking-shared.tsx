@@ -58,10 +58,12 @@ export function AlertsList({ summary }: { summary: DashboardData | null }) {
 }
 
 /**
- * Maker-checker gate for sensitive actions (UI-enforced until a backend intents
- * endpoint exists — see FRONTEND_IMPLEMENTATION_PLAN.md §7). Maker and checker
- * must be different named actors; execution additionally requires the admin
- * bearer token server-side.
+ * Maker-checker gate for sensitive actions. Maker and checker must be
+ * different named actors; the checker step additionally uses the admin
+ * bearer token server-side. The Operations view records the decision as a
+ * backend approval intent (`POST /api/approvals/intents` → `…/approve`)
+ * before executing, so the two-person rule is auditable — and in strict
+ * mode (`INSTITUTIONAL_STRICT=1`) the backend refuses execution without it.
  */
 export function MakerCheckerDialog({ open, onClose, onApprove, action, target, locale }: {
   open: boolean; onClose: () => void; onApprove: (maker: string, checker: string, reason: string) => void;

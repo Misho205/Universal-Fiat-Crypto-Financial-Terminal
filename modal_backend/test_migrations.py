@@ -21,19 +21,22 @@ def _fresh(tmp_path, monkeypatch):
 def test_fresh_apply_and_idempotent_rerun(tmp_path, monkeypatch):
     f = _fresh(tmp_path, monkeypatch)
     first = db.migrate()
-    assert first == ["001_core.sql", "002_evm_pag.sql", "003_indexes.sql"], first
+    assert first == ["001_core.sql", "002_evm_pag.sql", "003_indexes.sql",
+                     "004_guardrails.sql"], first
     assert f.exists()
     assert db.migrate() == []  # rerun applies nothing
     conn = sqlite3.connect(str(f))
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     for t in ("transactions", "idempotency", "evm_payments", "contract_agreements",
-              "schema_migrations"):
+              "approval_intents", "elevation_grants", "emergency_access",
+              "security_audit", "schema_migrations"):
         assert t in tables, t
     indexes = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
     for ix in ("idx_tx_tenant_state", "idx_evm_tenant_state", "idx_pag_tenant_state",
-               "idx_tx_provider_ref", "idx_evm_provider_tx"):
+                "idx_tx_provider_ref", "idx_evm_provider_tx",
+                "idx_intents_tenant_state", "idx_grants_tenant_actor", "idx_audit_tenant"):
         assert ix in indexes, ix
     conn.close()
     db._sqlite_conn = None
