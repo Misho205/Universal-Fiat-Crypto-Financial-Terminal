@@ -126,8 +126,12 @@ def test_bypass_attempts_fail(monkeypatch):
         # feature flags cannot resurrect inference
         assert c.post("/api/ai/assistant", json={"message": "hi"},
                       headers=H).status_code == 503
+        # analyze requires tenant scope too (audit fix); without it 400,
+        # with it 503 while disabled — both fail closed, nothing served
         assert c.post("/api/ai/analyze", json={"order": {}, "text": "x"},
-                      headers=AUTH).status_code in (401, 503)
+                      headers=AUTH).status_code == 400
+        assert c.post("/api/ai/analyze", json={"order": {}, "text": "x"},
+                      headers={**AUTH, "X-Tenant-Id": TENANT}).status_code == 503
     finally:
         _enable(c)
 

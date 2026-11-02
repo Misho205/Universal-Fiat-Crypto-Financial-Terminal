@@ -276,9 +276,23 @@ def outbox_pending() -> int:
 
 
 def must_audit(**kwargs: Any) -> dict[str, Any]:
-    """Mandatory audit write: raises (fail closed) when recording fails.
+    """Mandatory audit write: raises when recording fails (fail closed).
 
     Sensitive operations MUST call this BEFORE mutating state; a storage
     failure refuses the operation instead of executing it silently unaudited.
     """
     return record_event(**kwargs)
+
+
+def must_audit_or_503(**kwargs: Any) -> dict[str, Any]:
+    """HTTP-facing mandatory audit: storage failure becomes 503 (fail closed).
+
+    Single canonical mapping so every sensitive path fails the same way
+    (previously 500 and 503 were mixed across routers).
+    """
+    try:
+        return must_audit(**kwargs)
+    except AuditWriteError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"audit unavailable, "
+                                                   f"fail closed: {exc}") from exc

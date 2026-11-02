@@ -106,6 +106,20 @@ a11y contract tests, load probe, AI + institutional guardrails (see CHANGELOG +
   `DISPUTE_HANDLING_POLICY.md`, `CUSTOMER_RIGHTS_WORKFLOW.md`.
   No auto-deploy; sandbox/testnet only.
 
+## 3e. Security integration audit (2026-11-02, sandbox only)
+- `pytest modal_backend/` → **217 passed, 4 skipped** (+10
+  `test_security_integration.py`: high-risk auth, approval-reuse e2e,
+  fail-closed outage, cross-module tenant isolation, role-split disputes).
+- Fixed: `ai/analyze` tenant scope + feature flag; binding + fail-closed audit
+  on amend/cancel/dispute; unified `must_audit_or_503` (was 500/503 mixed);
+  structured audit for restriction appeals. Full-suite + frontend green;
+  backend boot + 85 OpenAPI paths verified; `next build` green.
+- Docs: `SECURITY_INTEGRATION_AUDIT.md` (PASS/FAIL/NOT IMPLEMENTED/NOT TESTED),
+  `SECURITY_CONTROL_MATRIX.md`, `REMAINING_RISKS.md` (R-11/R-12, O-01…O-04,
+  L-01…L-04), `DEPLOYMENT_READINESS.md` (sandbox READY; staging/production
+  NOT READY; 4 live skips enumerated, untested areas listed).
+  No auto-deploy; no real customer data.
+
 ## 4. Implemented but NOT live-tested (needs operator key/infra)
 - Stripe TEST network calls (`StripeTestProvider.create/confirm/retrieve`) — mocked path tested; real
   `sk_test_*` exchange documented in `docs/fiat-sandbox.md`, not executed (no key provided).

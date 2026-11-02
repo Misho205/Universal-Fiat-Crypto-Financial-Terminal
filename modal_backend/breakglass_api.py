@@ -125,7 +125,7 @@ async def session_request(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     bg.session_put(doc)
-    _audit.must_audit(tenant=tenant, actor=body.requestor,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.requestor,
                       action="breakglass.session.requested", resource=doc["id"],
                       outcome=doc["state"], correlation_id=doc["id"],
                       detail=f"{body.incidentRef}: {body.justification[:200]}")
@@ -157,7 +157,7 @@ async def session_approve(
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     bg.session_put(doc)
-    _audit.must_audit(tenant=tenant, actor=body.approver,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.approver,
                       action="breakglass.session.approved", resource=session_id,
                       outcome="active", correlation_id=session_id,
                       detail=f"incident {doc['incidentRef']}")
@@ -183,7 +183,7 @@ async def session_extend(
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     bg.session_put(doc)
-    _audit.must_audit(tenant=tenant, actor=body.actor,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.actor,
                       action="breakglass.session.extended", resource=session_id,
                       outcome="active", correlation_id=session_id,
                       detail=f"+{body.extraSec}s")
@@ -221,7 +221,7 @@ async def session_revoke(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     bg.session_put(doc)
-    _audit.must_audit(tenant=tenant, actor=body.actor,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.actor,
                       action="breakglass.session.revoked", resource=session_id,
                       outcome="revoked", correlation_id=session_id,
                       detail=body.reason[:200])
@@ -253,7 +253,7 @@ async def session_review(
     from . import db as _db
 
     _db.audit_append(tenant, "breakglass.session.reviewed", body.reviewer, session_id)
-    _audit.must_audit(tenant=tenant, actor=body.reviewer,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.reviewer,
                       action="breakglass.session.reviewed", resource=session_id,
                       outcome="closed", correlation_id=session_id,
                       detail=body.findings[:500])
@@ -285,7 +285,7 @@ async def gateway_action(
                        or "unknown or revoked" in msg) else 409
         raise HTTPException(status_code=code, detail=msg) from exc
     result = await _execute_gateway_action(tenant, body, grant)
-    _audit.must_audit(tenant=tenant, actor=f"breakglass:{doc['requestor']}",
+    _audit.must_audit_or_503(tenant=tenant, actor=f"breakglass:{doc['requestor']}",
                       action=f"breakglass.action.{body.action}",
                       resource=body.sessionId, outcome="ok",
                       correlation_id=body.sessionId,

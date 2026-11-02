@@ -1,6 +1,18 @@
 # Changelog
 
 ## Unreleased (local only — NOT deployed; deploy needs explicit approval)
+- Integration audit of the 5 security modules (this tranche): 17-endpoint
+  auth-chain review, 10 new `test_security_integration.py` regression tests.
+  Fixed: unguarded analysis route gained tenant scope + feature flag (G-01);
+  `agreement.amend/cancel/dispute` gained binding enforcement + fail-closed
+  audit (G-02); unified `must_audit_or_503` across all routers (G-03, was
+  500/503 mixed); structured audit for restriction appeals (G-04). Duplicates
+  (legacy intents, triple audit chains, permissive PDP wiring) documented as
+  accepted compat with migration path (G-05). Docs:
+  `SECURITY_INTEGRATION_AUDIT.md`, `SECURITY_CONTROL_MATRIX.md`,
+  `REMAINING_RISKS.md`, `DEPLOYMENT_READINESS.md` (sandbox READY, staging/
+  production NOT READY; 4 opt-in live skips enumerated).
+- Tests: backend 217 passed / 4 skipped (+10); terminal 25/25; builds green.
 - Break-glass emergency access (`breakglass.py`, `breakglass_api.py`, migration
   007): narrowly scoped short-lived sessions, MFA attestation, independent
   approval, preauthorized read-only outage path, session-token gateway (no

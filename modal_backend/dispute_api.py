@@ -60,10 +60,7 @@ class EvidenceIn(BaseModel):
 
 
 def _must_audit(**kw: Any) -> None:
-    try:
-        _audit.must_audit(**kw)
-    except _audit.AuditWriteError as exc:
-        raise HTTPException(status_code=503, detail=f"audit unavailable: {exc}") from exc
+    _audit.must_audit_or_503(**kw)
 
 
 @router.post("/api/disputes", status_code=201)

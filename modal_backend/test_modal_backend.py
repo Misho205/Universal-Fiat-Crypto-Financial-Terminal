@@ -71,7 +71,7 @@ def test_contract_validator_allowlist_and_ai_never_authoritative():
     evil = {"amountMinor": "1000", "beneficiaries": [{"shareBps": 10000}],
             "conditions": [{"type": "exec(evil)"}], "executionModel": "pay-after-condition"}
     assert c.post("/api/contracts/validate", json={"terms": evil}, headers=AUTH).json()["ok"] is False
-    ai = c.post("/api/ai/analyze", json={"order": {}, "text": "draft please"}, headers=AUTH)
+    ai = c.post("/api/ai/analyze", json={"order": {}, "text": "draft please"}, headers={**AUTH, **TENANT})
     assert ai.json()["authoritative"] is False
 
 

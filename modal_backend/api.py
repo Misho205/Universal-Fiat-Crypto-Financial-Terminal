@@ -115,13 +115,9 @@ def _must_audit_or_503(*, tenant: str, actor: str, action: str, resource: str,
     """
     from . import audit_store as _audit
 
-    try:
-        _audit.must_audit(tenant=tenant, actor=actor, action=action,
-                          resource=resource, outcome=outcome, policy="ab-v1",
-                          approval_ref=approval_ref, detail=detail)
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"audit unavailable, "
-                                                   f"fail closed: {exc}") from exc
+    _audit.must_audit_or_503(tenant=tenant, actor=actor, action=action,
+                             resource=resource, outcome=outcome, policy="ab-v1",
+                             approval_ref=approval_ref, detail=detail)
 
 
 def _binding_enforce(*, tenant: str, op_type: str, target_id: str,
@@ -173,11 +169,11 @@ def _binding_enforce(*, tenant: str, op_type: str, target_id: str,
                          f"{consumed['id']} {op_type} {target_id}"[:500])
         from . import audit_store as _audit
 
-        _audit.must_audit(tenant=tenant, actor="policy-engine",
-                          action="approval.binding.consumed",
-                          resource=consumed["id"], outcome="consumed",
-                          policy="ab-v1", approval_ref=consumed["id"],
-                          detail=f"{op_type} {target_id}")
+        _audit.must_audit_or_503(tenant=tenant, actor="policy-engine",
+                                 action="approval.binding.consumed",
+                                 resource=consumed["id"], outcome="consumed",
+                                 policy="ab-v1", approval_ref=consumed["id"],
+                                 detail=f"{op_type} {target_id}")
         return consumed
     raise HTTPException(status_code=409, detail="APPROVAL_BINDING: " + (
         "; ".join(dict.fromkeys(failures)) if failures
@@ -450,10 +446,12 @@ async def ready() -> dict[str, Any]:
 
 
 @app.post("/api/ai/analyze")
-async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth),
-                     _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
+async def ai_analyze(body: AiAnalyzeIn, tenant: str = Depends(require_tenant),
+                     caller: str = Depends(require_auth),
+                     _guard: None = Depends(require_ai_enabled),
+                     _feat: None = Depends(require_ai_feature("explainers"))) -> dict[str, Any]:
     """Draft agreement brief (advisory). Kill-switch guarded like all AI routes —
-    previously this route missed the guard (audit fix)."""
+    previously this route missed both the guard and tenant scoping (audit fix)."""
     log_event(logger, "ai.analyze", caller=caller)
     draft = ai.draft_agreement_brief(body.order)
     # Standard advisory envelope (legacy "draft" shape preserved inside data).
@@ -1137,7 +1135,17 @@ async def pag_amend(agreement_id: str, body: PagAmendIn, tenant: str = Depends(r
         [c.model_dump() for c in body.consents])
     if not ok:
         raise HTTPException(status_code=409, detail=why)
+    _binding_enforce(tenant=tenant, op_type="agreement.amend",
+                     target_id=agreement_id,
+                     amount_minor=str(ag.get("terms", {}).get("amountMinor", "0")),
+                     currency=ag.get("terms", {}).get("currency", ""),
+                     contract_version=int(ag.get("version", 1)),
+                     terms_hash=ag.get("termsHash", ""))
     _db.pag_put(ag)
+    _must_audit_or_503(tenant=tenant, actor=body.actor,
+                       action="contract.pag.amended", resource=agreement_id,
+                       outcome=f"version-{ag['version']}",
+                       detail=f"termsHash={ag.get('termsHash', '')[:16]}")
     log_event(logger, "contract.pag.amended", tenant=tenant, caller=caller,
               agreementId=ag["id"])
     return {"agreementId": ag["id"], "version": ag["version"],
@@ -1229,8 +1237,17 @@ async def pag_cancel(agreement_id: str, body: PagActorIn, tenant: str = Depends(
     ok, why = programmable.can_transition(ag["state"], "canceled", body.role)
     if not ok:
         raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
+    _binding_enforce(tenant=tenant, op_type="agreement.cancel",
+                     target_id=agreement_id,
+                     amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")),
+                     currency=(ag.get("terms", {}) or {}).get("currency", ""),
+                     contract_version=int(ag.get("version", 1)),
+                     terms_hash=ag.get("termsHash", ""))
     programmable.append_event(ag, body.actor, "cancel", "canceled")
     _db.pag_put(ag)
+    _must_audit_or_503(tenant=tenant, actor=body.actor,
+                       action="contract.pag.canceled", resource=agreement_id,
+                       outcome="canceled", detail="")
     return {"agreementId": ag["id"], "state": "canceled", "sandbox": True}
 
 
@@ -1245,8 +1262,17 @@ async def pag_dispute(agreement_id: str, body: PagActorIn, tenant: str = Depends
     ok, why = programmable.can_transition(ag["state"], "disputed", body.role)
     if not ok:
         raise HTTPException(status_code=409 if "illegal" in why else 403, detail=why)
+    _binding_enforce(tenant=tenant, op_type="agreement.dispute",
+                     target_id=agreement_id,
+                     amount_minor=str((ag.get("terms", {}) or {}).get("amountMinor", "0")),
+                     currency=(ag.get("terms", {}) or {}).get("currency", ""),
+                     contract_version=int(ag.get("version", 1)),
+                     terms_hash=ag.get("termsHash", ""))
     programmable.append_event(ag, body.actor, "dispute", "disputed")
     _db.pag_put(ag)
+    _must_audit_or_503(tenant=tenant, actor=body.actor,
+                       action="contract.pag.disputed", resource=agreement_id,
+                       outcome="disputed", detail="")
     return {"agreementId": ag["id"], "state": "disputed", "sandbox": True}
 
 
@@ -1507,14 +1533,11 @@ async def ai_kill_switch(body: AiKillSwitchIn, tenant: str = Depends(require_ten
                                 detail=f"disabled={body.disabled} {body.reason}"[:200])
     _db.audit_append(tenant, "ai.killswitch", caller,
                      f"disabled={body.disabled} reason={body.reason}"[:500])
-    try:
-        from . import audit_store as _audit
-        _audit.must_audit(tenant=tenant, actor=caller,
-                          action="ai.killswitch", resource="ai-control",
-                          outcome="disabled" if body.disabled else "enabled",
-                          detail=body.reason[:200])
-    except _audit.AuditWriteError as exc:
-        raise HTTPException(status_code=503, detail=f"audit unavailable: {exc}") from exc
+    from . import audit_store as _audit
+    _audit.must_audit_or_503(tenant=tenant, actor=caller,
+                             action="ai.killswitch", resource="ai-control",
+                             outcome="disabled" if body.disabled else "enabled",
+                             detail=body.reason[:200])
     log_event(logger, "ai.killswitch", tenant=tenant, caller=caller, **state)
     return {**state, "sandbox": True,
             "note": "Distributed switch: all replicas enforce on next check; "

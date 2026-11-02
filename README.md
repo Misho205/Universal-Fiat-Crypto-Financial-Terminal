@@ -113,6 +113,7 @@ Full checklist, secrets, costs, verification, rollback, readiness: `docs/modal-d
 - `docs/PDP_EVALUATION.md`, `docs/POLICY_MATRIX.md` — centralized PDP (OPA-vs-Cerbos selection) + authorization matrix.
 - `docs/AGREEMENT_CRYPTO_GUARDRAILS.md` — programmable-agreement + Sepolia guardrails, adversarial coverage.
 - `SECURITY_AUDIT.md`, `GUARDRAIL_TEST_REPORT.md`, `THREAT_MODEL.md`, `REMEDIATION_PLAN.md` — independent audit (15 scenarios), findings, residual risks.
+- `SECURITY_INTEGRATION_AUDIT.md`, `SECURITY_CONTROL_MATRIX.md`, `REMAINING_RISKS.md`, `DEPLOYMENT_READINESS.md` — 5-module integration audit (PASS/FAIL/NOT IMPLEMENTED/NOT TESTED), control matrix, sandbox-vs-production gates.
 - `BREAK_GLASS_POLICY.md`, `BREAK_GLASS_TEST_REPORT.md` — emergency access.
 - `AI_EMERGENCY_RESPONSE.md`, `AI_KILL_SWITCH_TEST_REPORT.md` — AI isolation.
 - `DISPUTE_HANDLING_POLICY.md`, `CUSTOMER_RIGHTS_WORKFLOW.md` — disputes + customer rights.

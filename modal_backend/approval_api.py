@@ -109,7 +109,7 @@ async def binding_create(
 
     # Fail closed: without a durable structured record the binding MUST NOT
     # exist (an unlogged approval is an unauthorized approval).
-    _audit.must_audit(tenant=tenant, actor=body.maker, action="approval.binding.created",
+    _audit.must_audit_or_503(tenant=tenant, actor=body.maker, action="approval.binding.created",
                       resource=doc["id"], outcome="pending", policy="ab-v1",
                       approval_ref=doc["id"],
                       detail=f"{body.opType} {body.targetId} digest={digest[:16]}")
@@ -162,7 +162,7 @@ async def binding_approve(
                      f"{binding_id} quorum={updated['quorum']}")
     from . import audit_store as _audit
 
-    _audit.must_audit(tenant=tenant, actor=body.checker,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.checker,
                       action=f"approval.binding.{updated['state']}",
                       resource=binding_id, outcome=updated["state"],
                       policy="ab-v1", approval_ref=binding_id,

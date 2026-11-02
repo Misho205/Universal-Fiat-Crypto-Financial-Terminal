@@ -146,7 +146,7 @@ async def restriction_create(
                      f"{doc['id']} {body.category}/{body.ground}/{body.reasonCode}"[:500])
     from . import audit_store as _audit
 
-    _audit.must_audit(tenant=tenant, actor=body.authorizer,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.authorizer,
                       action="rights.restriction.created", resource=doc["id"],
                       outcome="active", policy="rights-v1",
                       detail=f"{body.category}/{body.ground}/{body.reasonCode}")
@@ -216,7 +216,7 @@ async def restriction_lift(
     _db.audit_append(tenant, "rights.restriction.lifted", body.actor, restriction_id)
     from . import audit_store as _audit
 
-    _audit.must_audit(tenant=tenant, actor=body.actor,
+    _audit.must_audit_or_503(tenant=tenant, actor=body.actor,
                       action="rights.restriction.lifted", resource=restriction_id,
                       outcome="lifted", policy="rights-v1",
                       detail=body.reason[:200])
