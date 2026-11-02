@@ -217,7 +217,9 @@ def reset_for_tests() -> None:
                           "security_audit", "schema_migrations",
                           "rights_restrictions", "rights_appeals",
                           "pdp_decisions", "approval_bindings",
-                          "audit_events", "audit_outbox"):
+                          "audit_events", "audit_outbox",
+                          "breakglass_sessions", "ai_control",
+                          "dispute_cases", "dispute_evidence"):
                 try:
                     conn.execute(f"DELETE FROM {table}")
                 except Exception:
@@ -238,7 +240,8 @@ def reset_for_tests() -> None:
                    "approval_intents", "elevation_grants", "emergency_access",
                    "security_audit", "rights_restrictions", "rights_appeals",
                    "pdp_decisions", "approval_bindings", "audit_events",
-                   "audit_outbox"):
+                   "audit_outbox", "breakglass_sessions", "ai_control",
+                   "dispute_cases", "dispute_evidence"):
         _exec_write(f"DELETE FROM {table}")
 
 

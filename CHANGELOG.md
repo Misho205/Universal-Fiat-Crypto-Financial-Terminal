@@ -1,6 +1,28 @@
 # Changelog
 
 ## Unreleased (local only — NOT deployed; deploy needs explicit approval)
+- Break-glass emergency access (`breakglass.py`, `breakglass_api.py`, migration
+  007): narrowly scoped short-lived sessions, MFA attestation, independent
+  approval, preauthorized read-only outage path, session-token gateway (no
+  balance/transfer/signing/role/audit powers by construction), anti
+  self-extension, revocation + rotation, mandatory retrospective review,
+  security notifications. 9 tests; `BREAK_GLASS_POLICY.md`,
+  `BREAK_GLASS_TEST_REPORT.md`.
+- AI kill switch + isolation (`ai_guardrails/control.py`): distributed DB-backed
+  control (no process-local reliance), per-feature flags (fraud_signals,
+  assistant wired), execution-time tool re-authorization (TOCTOU close),
+  kill-switch guard added to previously unguarded `/api/ai/analyze`, circuit
+  breaker with alert, dual-control re-enable (independent verifier). 8 tests;
+  `AI_EMERGENCY_RESPONSE.md`, `AI_KILL_SWITCH_TEST_REPORT.md`.
+- Customer disputes (`disputes.py`, `dispute_api.py`): unique cases, links,
+  evidence metadata validation (MIME/size/sha256/filename; sandbox scan stub,
+  production AV required), SLA deadlines, independent human review,
+  AI-never-decides, gag-aware outcomes, remediation proposals (refunds only via
+  approval bindings, never automatic), no silent close/delete. Personal
+  Disputes tab + Banking review queue (`DisputesPanel.tsx`, SDK methods).
+  8 backend + 3 frontend tests; `DISPUTE_HANDLING_POLICY.md`,
+  `CUSTOMER_RIGHTS_WORKFLOW.md`.
+- Tests: backend 207 passed / 4 skipped (+25); terminal vitest 25/25.
 - Independent security audit (15 adversarial scenarios, all sandbox): AI payment/
   freeze attempts, prompt injection, self-approval, balance modification, audit
   erasure, cross-tenant, replays, condition bypass, escalation, expired approvals,

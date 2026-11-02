@@ -1,5 +1,5 @@
 "use client";
-import { Activity, ArrowLeftRight, BarChart3, Bot, FileCheck2, Settings2, ShieldAlert, Stamp } from "lucide-react";
+import { Activity, ArrowLeftRight, BarChart3, Bot, FileCheck2, Scale, Settings2, ShieldAlert, Stamp } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { friendlyError, type ModalBackendClient } from "@hybridpay/sdk";
@@ -16,14 +16,16 @@ import { Field, Input, Select } from "../../src/components/ui/field";
 import { SandboxBadge, StatusBadge } from "../../src/components/ui/badge";
 import { usePolling } from "../../src/lib/polling";
 import { AccessGate, EnvBadge, KpiCard, KpiGrid, SectionCard, SectionNav, StatusTimeline, TenantRoleStrip, WorkspaceHeader } from "../../src/components/workspace";
+import { StaffDisputesPanel } from "../../src/DisputesPanel";
 
-type View = "overview" | "ops" | "contracts" | "approvals" | "risk" | "admin" | "analytics" | "assistant";
+type View = "overview" | "ops" | "contracts" | "approvals" | "disputes" | "risk" | "admin" | "analytics" | "assistant";
 
 const SECTIONS = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "ops", label: "Operations", icon: ArrowLeftRight },
   { id: "contracts", label: "Contracts", icon: FileCheck2 },
   { id: "approvals", label: "Approvals", icon: Stamp, adminOnly: true },
+  { id: "disputes", label: "Disputes", icon: Scale },
   { id: "risk", label: "Risk & Compliance", icon: ShieldAlert },
   { id: "admin", label: "Administration", icon: Settings2, adminOnly: true },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
@@ -73,6 +75,12 @@ export default function BankingPage() {
         </SectionCard>
       )}
       {view === "approvals" && <ApprovalsView modal={s.modal} locale={locale} isAdmin={isAdmin} />}
+      {view === "disputes" && (
+        <SectionCard title="Customer disputes"
+          hint="Review queue with independent reviewers and reasoned decisions. Refunds need separate explicit approval — never automatic.">
+          <StaffDisputesPanel modal={s.modal} locale={locale} isAdmin={isAdmin} />
+        </SectionCard>
+      )}
       {view === "risk" && <RiskView modal={s.modal} locale={locale} isAdmin={isAdmin} />}
       {view === "admin" && <AdminView modal={s.modal} tenant={s.tenant} role={s.role} isAdmin={isAdmin} onSign={(v) => s.signIn(v)} onLogout={s.logout} locale={locale} />}
       {view === "analytics" && <AnalyticsView modal={s.modal} locale={locale} />}

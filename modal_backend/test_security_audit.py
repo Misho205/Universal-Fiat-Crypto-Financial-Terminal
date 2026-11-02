@@ -397,10 +397,16 @@ def test_s14_compromised_ai_contained_by_kill_switch(monkeypatch):
         with pytest.raises(Exception):
             ai_tools.invoke_tool("execute_payment", {}, role="admin",
                                  tenant="t")
+        # unauthorized re-enablement refused (no verifier / same-as-disabler)
+        assert c.post("/api/admin/ai/kill-switch",
+                      json={"disabled": False, "reason": "x"},
+                      headers=AH).status_code == 403
     finally:
-        c.post("/api/admin/ai/kill-switch",
-               json={"disabled": False, "reason": "audit-s14-restore"},
-               headers=AH)
+        # independent verifier restores service
+        assert c.post("/api/admin/ai/kill-switch",
+                      json={"disabled": False, "reason": "audit-s14-restore",
+                            "verifiedBy": "second-human"},
+                      headers=AH).status_code == 200
 
 
 # --- S15: policy update removes mandatory approvals ------------------------------------

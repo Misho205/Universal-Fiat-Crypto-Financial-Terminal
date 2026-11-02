@@ -144,8 +144,18 @@ def test_kill_switch_blocks_ai_but_not_payments():
                 headers={**OP, "Idempotency-Key": "ks-k1"})
     assert ok.status_code == 201, ok.text
     assert c.get("/api/admin/ai/audit", headers=AD).status_code == 200
-    # re-enable
-    assert c.post("/api/admin/ai/kill-switch", json={"disabled": False}, headers=AD).status_code == 200
+    # re-enable requires independent verification (different human + reason)
+    assert c.post("/api/admin/ai/kill-switch",
+                  json={"disabled": False, "reason": "reviewed"},
+                  headers=AD).status_code == 403
+    assert c.post("/api/admin/ai/kill-switch",
+                  json={"disabled": False, "reason": "reviewed ok",
+                        "verifiedBy": "service-caller"},
+                  headers=AD).status_code == 403  # verifier == disabler actor
+    assert c.post("/api/admin/ai/kill-switch",
+                  json={"disabled": False, "reason": "reviewed ok",
+                        "verifiedBy": "second-human"},
+                  headers=AD).status_code == 200
     assert c.post("/api/ai/assistant", json={"message": "hello", "context": {}},
                   headers=OP).status_code == 200
 

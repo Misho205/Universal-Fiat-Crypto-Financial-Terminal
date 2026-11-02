@@ -284,6 +284,44 @@ export class ModalBackendClient {
         method: "POST", headers: this.headers(), body: JSON.stringify({ actor, role: "party" }),
       });
   }
+  // --- customer disputes (sandbox; filing never auto-refunds) ---
+  disputeCreate(body: { customer: string; category: string; description: string; transactionId?: string; restrictionId?: string; agreementId?: string; jurisdiction?: string }) {
+    if (!body.customer.trim()) throw new ApiError(400, "customer is required");
+    return this.request<{ caseId: string; state: string; slaDue: number; sandbox: boolean }>(
+      "/api/disputes", {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  disputeList(params: { state?: string; customer?: string; limit?: number } = {}) {
+    const q = new URLSearchParams();
+    if (params.state) q.set("state", params.state);
+    if (params.customer) q.set("customer", params.customer);
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request<{ cases: Array<{ id: string; category: string; state: string; decision: string; slaDue: number }>; sandbox: boolean }>(
+      `/api/disputes${qs}`, { headers: this.headers() });
+  }
+  disputeGet(caseId: string) {
+    return this.request<{ id: string; state: string; decision: string; outcome: string; evidence: Array<{ id: string; filename: string; verdict: string }>; sandbox: boolean }>(
+      `/api/disputes/${encodeURIComponent(caseId)}`, { headers: this.headers() });
+  }
+  disputeEvidence(caseId: string, body: { filename: string; mime: string; sizeBytes: number; sha256: string; submittedBy: string }) {
+    return this.request<{ evidenceId: string; verdict: string; sandbox: boolean; scanNote: string }>(
+      `/api/disputes/${encodeURIComponent(caseId)}/evidence`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  disputeReview(caseId: string, reviewer: string) {
+    return this.request(`/api/disputes/${encodeURIComponent(caseId)}/review`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ reviewer }),
+    });
+  }
+  disputeDecide(caseId: string, body: { decision: string; reason: string; reviewer: string; humanBasis: string; originalActor?: string; aiContributed?: boolean }) {
+    return this.request<{ caseId: string; state: string; decision: string; remediationPlan: string[]; sandbox: boolean }>(
+      `/api/disputes/${encodeURIComponent(caseId)}/decide`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
   aiAnalyze(order: Record<string, string>, text = "") {
     return this.request<AdvisoryEnvelope<{ suggestion: string; model?: string }>>(`/api/ai/analyze`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ order, text }),

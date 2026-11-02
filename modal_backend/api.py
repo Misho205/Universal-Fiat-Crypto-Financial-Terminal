@@ -60,6 +60,19 @@ def require_ai_enabled() -> None:
         raise HTTPException(status_code=503, detail=f"AI_DISABLED: {why}")
 
 
+def require_ai_feature(feature: str):
+    """Per-feature AI isolation: individual high-risk AI features can be
+    disabled independently of the global switch (distributed control plane)."""
+
+    async def _check() -> None:
+        from .ai_guardrails import control as _ai_control
+        if not _ai_control.is_feature_enabled(feature):
+            raise HTTPException(status_code=503,
+                                detail=f"AI_FEATURE_DISABLED: {feature}")
+
+    return _check
+
+
 def _strict_intent_required(*, tenant: str, action: str, target_id: str,
                             amount_minor: str = "0") -> None:
     """Institutional strict mode: sensitive money endpoints need an approved intent.
@@ -181,6 +194,14 @@ app.include_router(_approval_api.router)
 
 # Independent structured audit: read-only dashboard + verify + export.
 app.include_router(_audit_api.router)
+
+# Break-glass emergency sessions: narrowly scoped, short-lived, audited.
+from . import breakglass_api as _breakglass_api
+app.include_router(_breakglass_api.router)
+
+# Customer disputes + financial-rights remediation (backend; UI in workspaces).
+from . import dispute_api as _dispute_api
+app.include_router(_dispute_api.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -314,6 +335,9 @@ class AiDecisionIn(BaseModel):
 class AiKillSwitchIn(BaseModel):
     disabled: bool
     reason: str = Field(default="", max_length=200)
+    # Independent verification for re-enabling (a second human, different
+    # from the disabler — mirrors institutional emergency review).
+    verifiedBy: str = Field(default="", max_length=80)
 
 
 class IntentCreateIn(BaseModel):
@@ -345,18 +369,42 @@ class EmergencyIn(BaseModel):
 
 def _ai_or_429(fn, *args: Any) -> dict[str, Any]:
     """Run an advisory AI service; map rate limiting to HTTP 429."""
+    from .ai_guardrails import control as _ai_control
     tenant = args[-1] if args and isinstance(args[-1], str) else ""
     stub = not meta_client.has_key()
     try:
         out = fn(*args)
     except meta_client.MetaClientError as exc:
+        if tenant:
+            tripped = _ai_control.record_failure(tenant, exc.code)
+            if tripped["tripped"]:
+                try:
+                    from . import audit_store as _audit
+                    _audit.record_event(tenant=tenant, actor="circuit-breaker",
+                                        action="ai.alert.circuit_breaker",
+                                        resource="ai-inference", outcome="tripped",
+                                        detail=f"{exc.code}")
+                except Exception:
+                    pass
         if exc.code == "RATE_LIMITED":
+            try:
+                from . import audit_store as _audit2
+                _audit2.record_event(tenant=tenant, actor="policy-engine",
+                                     action="ai.alert.rate_limited",
+                                     resource="ai-inference", outcome="limited",
+                                     detail="AI rate limit exceeded")
+            except Exception:
+                pass
             raise HTTPException(status_code=429, detail="AI rate limit exceeded") from exc
         raise HTTPException(status_code=503, detail=f"AI_ERROR:{exc.code}") from exc
     if stub and tenant:
         # Offline stubs return before ai.py records usage; count the call
         # per-tenant so /api/ai/usage reflects real activity.
         meta_client.record_usage(fallback=True, tenant=tenant)
+    try:
+        _ai_control.record_success()
+    except Exception:
+        pass
     return out
 
 
@@ -402,7 +450,10 @@ async def ready() -> dict[str, Any]:
 
 
 @app.post("/api/ai/analyze")
-async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth)) -> dict[str, Any]:
+async def ai_analyze(body: AiAnalyzeIn, caller: str = Depends(require_auth),
+                     _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
+    """Draft agreement brief (advisory). Kill-switch guarded like all AI routes —
+    previously this route missed the guard (audit fix)."""
     log_event(logger, "ai.analyze", caller=caller)
     draft = ai.draft_agreement_brief(body.order)
     # Standard advisory envelope (legacy "draft" shape preserved inside data).
@@ -423,7 +474,8 @@ async def ai_explain(body: AiTransactionIn, tenant: str = Depends(require_tenant
 @app.post("/api/ai/fraud-signals")
 async def ai_fraud(body: AiTransactionIn, tenant: str = Depends(require_tenant),
                    caller: str = Depends(require_auth),
-                   _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
+                   _guard: None = Depends(require_ai_enabled),
+                   _feat: None = Depends(require_ai_feature("fraud_signals"))) -> dict[str, Any]:
     log_event(logger, "ai.fraud.request", caller=caller)
     out = _ai_or_429(ai.fraud_signals, body.transaction, tenant)
     # Deterministic gate travels WITH the advisory output: no consumer may
@@ -467,7 +519,8 @@ async def ai_explain_state(body: AiStateIn, tenant: str = Depends(require_tenant
 @app.post("/api/ai/assistant")
 async def ai_assistant(body: AiAssistantIn, tenant: str = Depends(require_tenant),
                        caller: str = Depends(require_auth),
-                       _guard: None = Depends(require_ai_enabled)) -> dict[str, Any]:
+                       _guard: None = Depends(require_ai_enabled),
+                       _feat: None = Depends(require_ai_feature("assistant"))) -> dict[str, Any]:
     log_event(logger, "ai.assistant.request", caller=caller)
     # Zero-trust input: validate + screen for prompt injection / role spoofing
     # BEFORE any model call. Attacks fail closed to a safe refusal.
@@ -1404,16 +1457,68 @@ async def ai_decision(body: AiDecisionIn, tenant: str = Depends(require_tenant),
 
 @app.post("/api/admin/ai/kill-switch")
 async def ai_kill_switch(body: AiKillSwitchIn, tenant: str = Depends(require_tenant),
-                         caller: str = Depends(require_admin)) -> dict[str, Any]:
-    """Emergency AI disable switch. Stops /api/ai/* (503) without touching payments."""
-    state = ai_policy.set_runtime_disabled(body.disabled, body.reason)
+                         caller: str = Depends(require_admin),
+                         authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Emergency AI disable switch: distributed control plane (all replicas).
+
+    Writes the durable control row (propagates without redeploy) AND the
+    legacy runtime flag. Disable takes effect on the next check everywhere
+    (new requests rejected immediately; in-flight tool actions invalidated at
+    execution time via generation check). Re-enabling requires an INDEPENDENT
+    verifier (verifiedBy != disabler actor, documented reason) — the model
+    can never re-enable itself (no model-output path writes control state),
+    ordinary employees (operator role) cannot override the disabled state, and
+    a single-credential sandbox records both identities for review. Production
+    must bind verifier identity to a second hardware credential / OIDC claim.
+    All transitions are independently audited.
+    """
+    from . import approval_binding as _ab
+    from .ai_guardrails import control as _ai_control
+    presented = ""
+    if authorization and authorization.startswith("Bearer "):
+        presented = authorization.removeprefix("Bearer ").strip()
+    cred = _ab.credential_id(presented)
+    # The disabler identity is the asserted admin actor for this call; the
+    # durable row keeps the authoritative last-disabler for dual control.
+    disabler_actor = caller if body.disabled else _ai_control.disabler_actor()
+    if body.disabled and not body.reason.strip():
+        raise HTTPException(status_code=422, detail="disabling AI requires a reason")
+    if not body.disabled:
+        if not body.reason.strip():
+            raise HTTPException(status_code=422, detail="re-enabling AI requires a reason")
+        if not body.verifiedBy.strip():
+            raise HTTPException(status_code=403, detail="DENY: re-enabling AI requires "
+                                                       "an independent verifier (verifiedBy)")
+        if body.verifiedBy.strip().lower() == disabler_actor.strip().lower():
+            raise HTTPException(status_code=403, detail="DENY: verifier must be independent "
+                                                       "of the disabler")
+    try:
+        state = _ai_control.set_control(
+            inference_enabled=not body.disabled,
+            actor=body.verifiedBy.strip() if not body.disabled else caller,
+            credential_id=cred, reason=body.reason,
+            require_different_cred="")
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # Mirror into the legacy runtime flag (compatibility; the DB row is
+    # authoritative and propagates to all replicas).
+    ai_policy.set_runtime_disabled(body.disabled, body.reason)
     ai_audit.log_security_event("ai.killswitch", tenant=tenant, actor=caller,
                                 detail=f"disabled={body.disabled} {body.reason}"[:200])
     _db.audit_append(tenant, "ai.killswitch", caller,
                      f"disabled={body.disabled} reason={body.reason}"[:500])
+    try:
+        from . import audit_store as _audit
+        _audit.must_audit(tenant=tenant, actor=caller,
+                          action="ai.killswitch", resource="ai-control",
+                          outcome="disabled" if body.disabled else "enabled",
+                          detail=body.reason[:200])
+    except _audit.AuditWriteError as exc:
+        raise HTTPException(status_code=503, detail=f"audit unavailable: {exc}") from exc
     log_event(logger, "ai.killswitch", tenant=tenant, caller=caller, **state)
     return {**state, "sandbox": True,
-            "note": "AI routes return 503 AI_DISABLED while engaged; payment APIs unaffected."}
+            "note": "Distributed switch: all replicas enforce on next check; "
+                    "payments unaffected; re-enable needs an independent credential."}
 
 
 @app.get("/api/admin/ai/audit")

@@ -88,6 +88,24 @@ a11y contract tests, load probe, AI + institutional guardrails (see CHANGELOG +
   `REMEDIATION_PLAN.md`, `APPROVAL_BINDING_SECURITY.md`, `AUDIT_ARCHITECTURE.md`,
   `AUDIT_INTEGRITY_TEST_REPORT.md`. No auto-deploy; no production capabilities added.
 
+## 3d. Break-glass + AI isolation + disputes (2026-11-02, sandbox only)
+- `pytest modal_backend/` → **207 passed, 4 skipped** (+25: 9 `test_breakglass.py`,
+  8 `test_ai_control.py`, 8 `test_disputes.py`); terminal vitest 25/25 (incl. new
+  `disputes.test.ts`); `next build` green with Personal Disputes tab + Banking
+  review queue.
+- New: `breakglass.py` + `breakglass_api.py` (session gateway, no money/signing/
+  audit powers by construction), `ai_guardrails/control.py` (distributed kill
+  switch, per-feature flags, circuit breaker, dual-control re-enable),
+  `disputes.py` + `dispute_api.py` (metadata-only evidence, independent review,
+  no automatic refunds), migration `007_breakglass_ai_disputes.sql`.
+- Fixed during testing: unguarded `/ai/analyze`; `invoke_tool` skipped
+  authorization; session response `id` vs `sessionId`; evidence placeholder
+  count; StatusBadge API usage; comment-semicolon migration syntax.
+- Docs: `BREAK_GLASS_POLICY.md`, `BREAK_GLASS_TEST_REPORT.md`,
+  `AI_EMERGENCY_RESPONSE.md`, `AI_KILL_SWITCH_TEST_REPORT.md`,
+  `DISPUTE_HANDLING_POLICY.md`, `CUSTOMER_RIGHTS_WORKFLOW.md`.
+  No auto-deploy; sandbox/testnet only.
+
 ## 4. Implemented but NOT live-tested (needs operator key/infra)
 - Stripe TEST network calls (`StripeTestProvider.create/confirm/retrieve`) — mocked path tested; real
   `sk_test_*` exchange documented in `docs/fiat-sandbox.md`, not executed (no key provided).

@@ -85,7 +85,26 @@ TOOLS = {"explain_receipt": explain_receipt, "summarize_agreement": summarize_ag
 
 
 def invoke_tool(name: str, args: dict[str, Any], *, role: str, tenant: str) -> dict[str, Any]:
-    """Single server-side entry point for any AI tool call. Default-deny."""
+    """Single server-side entry point for any AI tool call. Default-deny.
+
+    Authorization is enforced AGAIN here at execution time (not just at the
+    HTTP route): role/tenant allowlist, kill-switch, tool-execution switch,
+    and the control-plane generation. A disable/permission-revocation that
+    lands between request admission and execution invalidates the call —
+    closing the TOCTOU race for queued or concurrent tool actions.
+    """
+    from . import control as _control
+    from . import policy as _policy
+    allowed, reason = _policy.evaluate_tool(name, role=role, tenant=tenant)
+    if not allowed:
+        log_security_event("ai.tool.denied", tool=str(name)[:80],
+                           reason=reason, tenant=tenant)
+        raise PermissionError(f"DENY: {reason}")
+    tools_ok, tools_why = _control.are_tools_enabled()
+    if not tools_ok:
+        log_security_event("ai.tool.denied", tool=str(name)[:80],
+                           reason=tools_why, tenant=tenant)
+        raise PermissionError(f"DENY: {tools_why} (generation {_control.generation()})")
     fn = TOOLS.get(name)
     if fn is None:
         log_security_event("ai.tool.denied", tool=str(name)[:80],

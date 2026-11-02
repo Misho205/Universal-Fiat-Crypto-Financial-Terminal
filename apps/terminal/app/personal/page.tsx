@@ -1,10 +1,11 @@
 "use client";
-import { ArrowUpRight, CalendarClock, History, Home, Inbox, Settings as SettingsIcon, Bot, Wallet } from "lucide-react";
+import { ArrowUpRight, CalendarClock, History, Home, Inbox, Settings as SettingsIcon, Bot, Wallet, Scale } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { friendlyError, type ModalBackendClient } from "@hybridpay/sdk";
 import AssistantPanel from "../../src/AssistantPanel";
 import DashboardPanel from "../../src/DashboardPanel";
+import { CustomerDisputesPanel } from "../../src/DisputesPanel";
 import { Shell } from "../../src/components/shell";
 import { useSession } from "../../src/components/session";
 import { usePolling, TERMINAL_STATES } from "../../src/lib/polling";
@@ -15,7 +16,7 @@ import { StatusBadge } from "../../src/components/ui/badge";
 import { FIAT_CURRENCIES } from "../../src/currencies";
 import { EnvBadge, KpiCard, KpiGrid, SectionCard, SectionNav, TenantRoleStrip, WorkspaceHeader } from "../../src/components/workspace";
 
-type View = "dash" | "send" | "receive" | "program" | "assistant" | "history" | "settings";
+type View = "dash" | "send" | "receive" | "program" | "assistant" | "history" | "disputes" | "settings";
 
 const SECTIONS = [
   { id: "dash", label: "Dashboard", icon: Home },
@@ -24,6 +25,7 @@ const SECTIONS = [
   { id: "program", label: "Scheduled", icon: CalendarClock },
   { id: "assistant", label: "Assistant", icon: Bot },
   { id: "history", label: "History", icon: History },
+  { id: "disputes", label: "Disputes", icon: Scale },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -62,6 +64,11 @@ export default function PersonalPage() {
           </SectionCard>
         )}
         {view === "history" && <HistoryPanel modal={s.modal} locale={locale} />}
+        {view === "disputes" && (
+          <SectionCard title="Disputes" hint="File and track disputes. Human review with reasoned outcomes — AI scores never decide.">
+            <CustomerDisputesPanel modal={s.modal} locale={locale} />
+          </SectionCard>
+        )}
         {view === "settings" && <SettingsPanel onSign={s.signIn} onLogout={s.logout} role={s.role} locale={locale} />}
       </div>
     </Shell>

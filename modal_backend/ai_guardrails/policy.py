@@ -56,9 +56,22 @@ _runtime_reason = ""
 
 
 def is_ai_disabled() -> tuple[bool, str]:
-    """Kill-switch state. Env override wins; runtime flag is admin-toggled."""
+    """Kill-switch state. Env override wins; durable distributed control next;
+    process-local runtime flag last (kept for compatibility).
+
+    Requirement: never rely on a process-local flag alone — the DB-backed
+    control (`ai_guardrails/control.py`) propagates to every Modal
+    container/replica on its next check without redeploys.
+    """
     if os.environ.get("AI_DISABLED", "") == "1":
         return True, "AI_DISABLED env set"
+    try:
+        from . import control as _control
+        disabled, why = _control.is_inference_disabled()
+        if disabled:
+            return True, why
+    except Exception:
+        pass
     if _runtime_disabled:
         return False or True, _runtime_reason or "runtime kill-switch engaged"
     return False, ""

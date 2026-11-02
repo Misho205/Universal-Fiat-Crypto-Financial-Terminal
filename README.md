@@ -63,6 +63,19 @@ for hackathon demos.
   append-only events, hash-chained with seq, HMAC option, fail-closed writes,
   JSONL export + outbox, read-only auditor dashboard — see
   `AUDIT_ARCHITECTURE.md`, `AUDIT_INTEGRITY_TEST_REPORT.md`.
+- **Break-glass emergency access** (`modal_backend/breakglass.py`): narrowly
+  scoped short-lived sessions, MFA attestation, independent approval,
+  preauthorized read-only outage path, no balance/transfer/signing/audit
+  powers, revocation + mandatory retrospective review — see
+  `BREAK_GLASS_POLICY.md`, `BREAK_GLASS_TEST_REPORT.md`.
+- **AI kill switch + isolation** (`modal_backend/ai_guardrails/control.py`):
+  distributed DB-backed control (no process-local reliance), per-feature
+  flags, execution-time tool re-authorization, circuit breaker, dual-control
+  re-enable — see `AI_EMERGENCY_RESPONSE.md`, `AI_KILL_SWITCH_TEST_REPORT.md`.
+- **Customer disputes** (`modal_backend/disputes.py` + Personal/Banking UI):
+  unique cases, evidence metadata validation, independent human review,
+  AI-never-decides, gag-aware outcomes, no automatic refunds — see
+  `DISPUTE_HANDLING_POLICY.md`, `CUSTOMER_RIGHTS_WORKFLOW.md`.
 - **Security audit package**: `SECURITY_AUDIT.md` (15 scenarios), `GUARDRAIL_TEST_REPORT.md`,
   `THREAT_MODEL.md`, `REMEDIATION_PLAN.md`. Tests are evidence, not guarantees.
 - **Packages**: `domain` (exact money), `agreements` (DSL validator), `ledger` (balanced journal),
@@ -100,6 +113,9 @@ Full checklist, secrets, costs, verification, rollback, readiness: `docs/modal-d
 - `docs/PDP_EVALUATION.md`, `docs/POLICY_MATRIX.md` — centralized PDP (OPA-vs-Cerbos selection) + authorization matrix.
 - `docs/AGREEMENT_CRYPTO_GUARDRAILS.md` — programmable-agreement + Sepolia guardrails, adversarial coverage.
 - `SECURITY_AUDIT.md`, `GUARDRAIL_TEST_REPORT.md`, `THREAT_MODEL.md`, `REMEDIATION_PLAN.md` — independent audit (15 scenarios), findings, residual risks.
+- `BREAK_GLASS_POLICY.md`, `BREAK_GLASS_TEST_REPORT.md` — emergency access.
+- `AI_EMERGENCY_RESPONSE.md`, `AI_KILL_SWITCH_TEST_REPORT.md` — AI isolation.
+- `DISPUTE_HANDLING_POLICY.md`, `CUSTOMER_RIGHTS_WORKFLOW.md` — disputes + customer rights.
 - `APPROVAL_BINDING_SECURITY.md`, `AUDIT_ARCHITECTURE.md`, `AUDIT_INTEGRITY_TEST_REPORT.md` — digest-bound approvals, independent audit storage.
 - `docs/fiat-sandbox.md` — fiat E2E architecture + mocked tests + documented Stripe TEST run.
 - `docs/modal-deploy-checklist.md` — deploy procedure, verification, rollback, costs, readiness.
