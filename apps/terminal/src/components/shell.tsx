@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeftRight, FlaskConical, Home, Landmark, LayoutDashboard, User } from "lucide-react";
+import { ArrowLeftRight, FlaskConical, Home, Landmark, LayoutDashboard, LockKeyhole, User } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/", labelEn: "Terminal", labelBg: "Терминал", icon: Home },
   { href: "/banking", labelEn: "Banking", labelBg: "Банкиране", icon: Landmark, admin: true },
   { href: "/personal", labelEn: "Personal", labelBg: "Лично", icon: User },
+  { href: "/private", labelEn: "Private", labelBg: "Частно", icon: LockKeyhole },
   { href: "/design-system", labelEn: "Design system", labelBg: "Дизайн система", icon: LayoutDashboard },
   { href: "/simulator", labelEn: "Simulator", labelBg: "Симулатор", icon: FlaskConical },
 ];

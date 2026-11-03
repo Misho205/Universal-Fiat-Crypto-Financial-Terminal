@@ -190,7 +190,7 @@ export default function Home() {
           <label>{t.tokenLabel}: <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} autoComplete="off" placeholder={token ? "••••••" : ""} /></label>
         </div>
         <div style={{ marginTop: 8 }}>
-          <button style={btnPrimary} onClick={() => { setToken(tokenInput); setTokenInput(""); refreshRole(); }}>{t.signIn}</button>
+          <button style={btnPrimary} onClick={() => { setToken(tokenInput.trim()); setTokenInput(""); refreshRole(); }}>{t.signIn}</button>
           <button style={btnGhost} onClick={() => { setToken(""); setTokenInput(""); setRole("—"); }}>{t.logout}</button>
           <span style={{ marginLeft: 8 }}>{t.roleLabel}: <code>{role}</code>{role === "admin" ? "" : role === "operator" ? " (money movement needs admin)" : ""}</span>
         </div>

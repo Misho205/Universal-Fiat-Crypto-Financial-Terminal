@@ -251,6 +251,140 @@ def main() -> int:
     s, _ = call("GET", "/api/payments/fiat/does-not-exist")
     check("tenant isolation on random id (404)", s == 404, f"{s}")
 
+    # ---- session tranches: rights, PDP, bindings, break-glass, disputes, audit ----
+    s, b = call("GET", "/api/pdp/policy-version")
+    check("GET /api/pdp/policy-version", s == 200 and "policyVersion" in b, f"{s}")
+    s, b = call("POST", "/api/pdp/simulate", {"action": "mint-money"})
+    check("POST /api/pdp/simulate default-deny", s == 200 and '"allow":false' in b.replace(" ", ""), f"{s} {b[:100]}")
+    s, _ = call("GET", "/api/pdp/decisions")
+    check("GET /api/pdp/decisions (admin-only)", s in (200, 401, 403), f"{s}")
+
+    s, b = call("POST", "/api/approvals/bindings",
+                {"opType": "fiat.refund", "targetId": "probe-op", "initiator": "probe",
+                 "amountMinor": "10", "currency": "EUR", "ttlSec": 3600,
+                 "maker": "probe", "reason": "probe"})
+    _bid = ""
+    try:
+        _bid = json.loads(b).get("bindingId", "")
+    except Exception:
+        pass
+    check("POST /api/approvals/bindings", s in (201, 401, 403, 409), f"{s} {b[:120]}")
+    if _bid:
+        s, _ = call("GET", f"/api/approvals/bindings/{_bid}")
+        check("GET /api/approvals/bindings/{binding_id}", s in (200, 401, 403, 404), f"{s}")
+        s, _ = call("POST", f"/api/approvals/bindings/{_bid}/approve",
+                    {"checker": "probe-qa", "confirm": True, "reason": "probe"})
+        check("POST /api/approvals/bindings/{binding_id}/approve (admin-only)", s in (200, 401, 403, 409), f"{s}")
+
+    s, _ = call("GET", "/api/rights/jurisdictions")
+    check("GET /api/rights/jurisdictions", s == 200, f"{s}")
+    s, _ = call("POST", "/api/rights/jurisdictions/EU_GENERIC/legal-review",
+                {"reviewer": "probe", "date": "2026-11-02", "memo": "probe"})
+    check("POST /api/rights/jurisdictions/{jurisdiction_id}/legal-review (admin-only)", s in (200, 401, 403, 422), f"{s}")
+    s, _ = call("POST", "/api/rights/restrictions",
+                {"subject": "probe-acct", "category": "fraud_prevention",
+                 "ground": "FRAUD_SUSPICION", "reasonCode": "FRAUD_SUSPECT_HOLD",
+                 "restrictionType": "outbound_freeze", "authorizer": "probe",
+                 "evidence": ["probe-case"], "expiresInSec": 3600, "reviewInSec": 1800})
+    _rid = ""
+    try:
+        _rid = json.loads(b).get("restrictionId", "") if s == 201 else ""
+    except Exception:
+        pass
+    check("POST /api/rights/restrictions", s in (201, 401, 403, 422), f"{s}")
+    s, b = call("GET", "/api/rights/restrictions")
+    check("GET /api/rights/restrictions", s == 200 and "restrictions" in b, f"{s}")
+    if _rid:
+        s, _ = call("POST", f"/api/rights/restrictions/{_rid}/lift",
+                    {"actor": "probe", "reason": "probe"})
+        check("POST /api/rights/restrictions/{restriction_id}/lift (admin-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("GET", "/api/rights/me")
+    check("GET /api/rights/me", s == 200, f"{s}")
+    s, _ = call("GET", "/api/rights/monitoring/abuse-signals")
+    check("GET /api/rights/monitoring/abuse-signals (admin-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("POST", "/api/rights/appeals",
+                {"restrictionId": _rid or "rst-missing", "appellant": "probe",
+                 "groundsText": "probe appeal"})
+    check("POST /api/rights/appeals", s in (201, 401, 403, 404, 422), f"{s}")
+
+    if agid:
+        s, _ = call("POST", f"/api/contracts/programmable/{agid}/amend",
+                    {"actor": "m", "role": "creator", "expectedPrevHash": "stale",
+                     "newTerms": terms,
+                     "consents": [{"actor": "m", "termsHash": "x"},
+                                 {"actor": "c", "termsHash": "x"}]})
+        check("POST /api/contracts/programmable/{agreement_id}/amend (admin-only)", s in (200, 401, 403, 404, 409), f"{s}")
+
+    s, b = call("POST", "/api/breakglass/sessions",
+                {"incidentRef": "INC-PROBE-%s" % RUN, "justification": "probe drill",
+                 "requestor": "probe-op", "mfaMethod": "webauthn", "mfaRef": "probe-mfa",
+                 "scopes": ["payment.read", "audit.read"], "ttlSec": 900})
+    _bgs, _bgt = "", ""
+    try:
+        _bj = json.loads(b) if s == 201 else {}
+        _bgs, _bgt = _bj.get("sessionId", ""), _bj.get("sessionToken", "")
+    except Exception:
+        pass
+    check("POST /api/breakglass/sessions", s in (201, 401, 403, 422), f"{s}")
+    if _bgs:
+        s, _ = call("POST", f"/api/breakglass/sessions/{_bgs}/approve", {"approver": "probe-qa"})
+        check("POST /api/breakglass/sessions/{session_id}/approve (admin-only)", s in (200, 401, 403, 404, 409), f"{s}")
+        s, _ = call("POST", "/api/breakglass/actions",
+                    {"sessionId": _bgs, "sessionToken": _bgt or "bad",
+                     "action": "payment.read", "params": {"paymentId": "nope"}})
+        check("POST /api/breakglass/actions", s in (200, 401, 403, 404, 409), f"{s}")
+        s, _ = call("POST", f"/api/breakglass/sessions/{_bgs}/extend",
+                    {"actor": "probe-qa", "extraSec": 600})
+        check("POST /api/breakglass/sessions/{session_id}/extend", s in (200, 401, 403, 404, 409), f"{s}")
+        s, _ = call("POST", f"/api/breakglass/sessions/{_bgs}/revoke",
+                    {"actor": "probe-op", "reason": "probe done"})
+        check("POST /api/breakglass/sessions/{session_id}/revoke", s in (200, 401, 403, 404, 409), f"{s}")
+        s, _ = call("POST", f"/api/breakglass/sessions/{_bgs}/review",
+                    {"reviewer": "probe-auditor", "findings": "probe ok"})
+        check("POST /api/breakglass/sessions/{session_id}/review (admin-only)", s in (200, 401, 403, 404, 409), f"{s}")
+    s, _ = call("GET", "/api/breakglass/sessions")
+    check("GET /api/breakglass/sessions", s in (200, 401, 403), f"{s}")
+    s, _ = call("GET", "/api/breakglass/notifications")
+    check("GET /api/breakglass/notifications", s in (200, 401, 403), f"{s}")
+
+    s, b = call("POST", "/api/disputes",
+                {"customer": "probe-cust", "category": "disputed_fee",
+                 "description": "probe fee question", "transactionId": "%s-probe-pay" % RUN})
+    _dsp = ""
+    try:
+        _dsp = json.loads(b).get("caseId", "") if s == 201 else ""
+    except Exception:
+        pass
+    check("POST /api/disputes", s in (201, 401, 403, 409, 422, 429), f"{s} {b[:100]}")
+    s, _ = call("GET", "/api/disputes?customer=probe-cust")
+    check("GET /api/disputes", s == 200, f"{s}")
+    if _dsp:
+        s, _ = call("GET", f"/api/disputes/{_dsp}")
+        check("GET /api/disputes/{case_id}", s in (200, 401, 403, 404), f"{s}")
+        import hashlib as _hl2
+        s, _ = call("POST", f"/api/disputes/{_dsp}/evidence",
+                    {"filename": "receipt.pdf", "mime": "application/pdf",
+                     "sizeBytes": 100, "sha256": _hl2.sha256(b"probe").hexdigest(),
+                     "submittedBy": "probe-cust"})
+        check("POST /api/disputes/{case_id}/evidence", s in (201, 401, 403, 404, 409, 422), f"{s}")
+        s, _ = call("POST", f"/api/disputes/{_dsp}/review", {"reviewer": "probe-rev"})
+        check("POST /api/disputes/{case_id}/review", s in (200, 401, 403, 404, 409), f"{s}")
+        s, _ = call("POST", f"/api/disputes/{_dsp}/decide",
+                    {"decision": "rejected", "reason": "probe records match",
+                     "reviewer": "probe-rev", "humanBasis": "probe ledger"})
+        check("POST /api/disputes/{case_id}/decide", s in (200, 401, 403, 404, 409, 422), f"{s}")
+        s, _ = call("POST", f"/api/disputes/{_dsp}/close", {})
+        check("POST /api/disputes/{case_id}/close", s in (200, 401, 403, 404, 409), f"{s}")
+
+    s, _ = call("GET", "/api/audit/events")
+    check("GET /api/audit/events (auditor-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("GET", "/api/audit/verify")
+    check("GET /api/audit/verify (auditor-only)", s in (200, 401, 403), f"{s}")
+    s, _ = call("POST", "/api/audit/export")
+    check("POST /api/audit/export (admin-only)", s in (200, 401, 403, 503), f"{s}")
+    s, _ = call("POST", "/api/admin/ai/features", {"features": {}, "reason": "probe"})
+    check("POST /api/admin/ai/features (admin-only)", s in (200, 401, 403, 422), f"{s}")
+
     failed = [n for n, ok, _ in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} endpoints OK")
     if failed:

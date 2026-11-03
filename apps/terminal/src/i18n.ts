@@ -27,7 +27,7 @@ export const dict = {
     ask: "Ask", whyState: "Why this state?", explainCrypto: "Explain (AI)",
     usageLabel: "AI usage", validatedLabel: "validated", stubLabel: "offline stub",
     tabDashboard: "Dashboard", tokenLabel: "API token (memory only)", logout: "Log out",
-    signIn: "Use token",
+    signIn: "Sign in",
   },
   bg: {
     newOrder: "Нова поръчка", amount: "Сума (EUR)", create: "Създай и покажи QR",

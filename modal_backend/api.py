@@ -1481,6 +1481,31 @@ async def ai_decision(body: AiDecisionIn, tenant: str = Depends(require_tenant),
     return {**decision, "sandbox": True}
 
 
+class AiFeaturesIn(BaseModel):
+    features: dict[str, bool] = Field(default_factory=dict)
+    reason: str = Field(default="", max_length=500)
+
+
+@app.post("/api/admin/ai/features")
+async def ai_features(body: AiFeaturesIn, tenant: str = Depends(require_tenant),
+                      caller: str = Depends(require_admin)) -> dict[str, Any]:
+    """Per-feature AI isolation: disable individual high-risk features without
+    touching global inference (admin only, audited). Unknown names rejected."""
+    from .ai_guardrails import control as _ai_control
+    if not body.reason.strip():
+        raise HTTPException(status_code=422, detail="a reason is required")
+    try:
+        state = _ai_control.set_control(features=body.features, actor=caller,
+                                         credential_id="", reason=body.reason)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    ai_audit.log_security_event("ai.features.changed", tenant=tenant, actor=caller,
+                                detail=f"{body.features} {body.reason}"[:200])
+    _db.audit_append(tenant, "ai.features.changed", caller,
+                     f"{body.features} reason={body.reason}"[:500])
+    return {**state, "sandbox": True}
+
+
 @app.post("/api/admin/ai/kill-switch")
 async def ai_kill_switch(body: AiKillSwitchIn, tenant: str = Depends(require_tenant),
                          caller: str = Depends(require_admin),

@@ -322,6 +322,159 @@ export class ModalBackendClient {
         method: "POST", headers: this.headers(), body: JSON.stringify(body),
       });
   }
+  // --- financial rights (restrictions + appeals + jurisdictions) ---
+  rightsRestrictionCreate(body: { subject: string; category: string; ground: string; reasonCode: string; restrictionType: string; authorizer: string; evidence?: string[]; jurisdiction?: string; expiresInSec?: number; reviewInSec?: number }) {
+    return this.request<{ restrictionId: string; state: string; sandbox: boolean }>(
+      "/api/rights/restrictions", {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  rightsRestrictionsList(params: { state?: string; subject?: string } = {}) {
+    const q = new URLSearchParams();
+    if (params.state) q.set("state", params.state);
+    if (params.subject) q.set("subject", params.subject);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request(`/api/rights/restrictions${qs}`, { headers: this.headers() });
+  }
+  rightsRestrictionLift(restrictionId: string, actor: string, reason: string) {
+    return this.request(
+      `/api/rights/restrictions/${encodeURIComponent(restrictionId)}/lift`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify({ actor, reason }),
+      });
+  }
+  rightsAppealCreate(body: { restrictionId: string; appellant: string; groundsText: string; contact?: string }) {
+    return this.request<{ appealId: string; state: string; sandbox: boolean }>(
+      "/api/rights/appeals", {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  rightsAppealReview(appealId: string) {
+    return this.request(`/api/rights/appeals/${encodeURIComponent(appealId)}/review`, {
+      method: "POST", headers: this.headers(),
+    });
+  }
+  rightsAppealDecide(appealId: string, body: { decision: string; reason: string; reviewer: string }) {
+    return this.request(`/api/rights/appeals/${encodeURIComponent(appealId)}/decide`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(body),
+    });
+  }
+  rightsJurisdictions() {
+    return this.request(`/api/rights/jurisdictions`, { headers: this.headers() });
+  }
+  rightsJurisdictionReview(jurisdictionId: string, body: { reviewer: string; date: string; memo: string }) {
+    return this.request(
+      `/api/rights/jurisdictions/${encodeURIComponent(jurisdictionId)}/legal-review`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  rightsAbuseSignals() {
+    return this.request(`/api/rights/monitoring/abuse-signals`, { headers: this.headers() });
+  }
+  rightsMe() {
+    return this.request(`/api/rights/me`, { headers: this.headers() });
+  }
+  // --- centralized PDP (decisions, simulation, pinned version) ---
+  pdpDecisions(limit = 50) {
+    return this.request(`/api/pdp/decisions?limit=${limit}`, { headers: this.headers() });
+  }
+  pdpSimulate(body: { action: string; resourceType?: string; resourceTenant?: string; context?: Record<string, unknown> }) {
+    return this.request(`/api/pdp/simulate`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(body),
+    });
+  }
+  pdpVersion() {
+    return this.request<{ policyVersion: string; actions: string[]; sandbox: boolean }>(
+      `/api/pdp/policy-version`, { headers: this.headers() });
+  }
+  // --- cryptographic approval bindings ---
+  bindingCreate(body: { opType: string; targetId: string; initiator: string; amountMinor?: string; currency?: string; ttlSec?: number; maker: string; reason: string }) {
+    return this.request<{ bindingId: string; opDigest: string; state: string; sandbox: boolean }>(
+      "/api/approvals/bindings", {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  bindingGet(bindingId: string) {
+    return this.request(
+      `/api/approvals/bindings/${encodeURIComponent(bindingId)}`, { headers: this.headers() });
+  }
+  bindingApprove(bindingId: string, body: { checker: string; confirm: boolean; reason: string }, idempotencyKey: string) {
+    return this.request(
+      `/api/approvals/bindings/${encodeURIComponent(bindingId)}/approve`, {
+        method: "POST", headers: this.headers({ "Idempotency-Key": idempotencyKey }),
+        body: JSON.stringify(body),
+      });
+  }
+  // --- break-glass emergency sessions (narrow scopes, audited gateway) ---
+  breakglassRequest(body: { incidentRef: string; justification: string; requestor: string; mfaMethod: string; mfaRef: string; scopes: string[]; ttlSec?: number; preauthorized?: boolean; approvalUnreachable?: boolean }) {
+    return this.request<{ sessionId: string; sessionToken: string; state: string; sandbox: boolean }>(
+      "/api/breakglass/sessions", {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  breakglassApprove(sessionId: string, approver: string) {
+    return this.request(`/api/breakglass/sessions/${encodeURIComponent(sessionId)}/approve`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ approver }),
+    });
+  }
+  breakglassExtend(sessionId: string, actor: string, extraSec: number) {
+    return this.request(`/api/breakglass/sessions/${encodeURIComponent(sessionId)}/extend`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ actor, extraSec }),
+    });
+  }
+  breakglassRevoke(sessionId: string, actor: string, reason = "") {
+    return this.request(`/api/breakglass/sessions/${encodeURIComponent(sessionId)}/revoke`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ actor, reason }),
+    });
+  }
+  breakglassReview(sessionId: string, reviewer: string, findings: string) {
+    return this.request(`/api/breakglass/sessions/${encodeURIComponent(sessionId)}/review`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ reviewer, findings }),
+    });
+  }
+  breakglassAct(body: { sessionId: string; sessionToken: string; action: string; confirm?: boolean; reason?: string; params?: Record<string, unknown> }) {
+    return this.request(`/api/breakglass/actions`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify(body),
+    });
+  }
+  breakglassSessions() {
+    return this.request(`/api/breakglass/sessions`, { headers: this.headers() });
+  }
+  breakglassNotifications(limit = 50) {
+    return this.request(`/api/breakglass/notifications?limit=${limit}`, { headers: this.headers() });
+  }
+  // --- independent audit (read-only dashboard + verify + export) ---
+  auditEvents(params: { action?: string; limit?: number } = {}) {
+    const q = new URLSearchParams();
+    if (params.action) q.set("action", params.action);
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return this.request(`/api/audit/events${qs}`, { headers: this.headers() });
+  }
+  auditVerify() {
+    return this.request(`/api/audit/verify`, { headers: this.headers() });
+  }
+  auditExport() {
+    return this.request(`/api/audit/export`, { method: "POST", headers: this.headers() });
+  }
+  // --- agreement amendment (versioned, dual consent) ---
+  pagAmend(agreementId: string, body: { actor: string; role: string; expectedPrevHash: string; newTerms: unknown; consents: Array<{ actor: string; termsHash: string }> }) {
+    return this.request(
+      `/api/contracts/programmable/${encodeURIComponent(agreementId)}/amend`, {
+        method: "POST", headers: this.headers(), body: JSON.stringify(body),
+      });
+  }
+  // --- AI governance (admin control plane) ---
+  aiKillSwitch(disabled: boolean, reason: string, verifiedBy = "") {
+    return this.request(`/api/admin/ai/kill-switch`, {
+      method: "POST", headers: this.headers(),
+      body: JSON.stringify({ disabled, reason, verifiedBy }),
+    });
+  }
+  aiFeatures(features: Record<string, boolean>, reason: string) {
+    return this.request(`/api/admin/ai/features`, {
+      method: "POST", headers: this.headers(), body: JSON.stringify({ features, reason }),
+    });
+  }
   aiAnalyze(order: Record<string, string>, text = "") {
     return this.request<AdvisoryEnvelope<{ suggestion: string; model?: string }>>(`/api/ai/analyze`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ order, text }),
@@ -394,11 +547,6 @@ export class ModalBackendClient {
   aiDecision(kind: string, output: unknown) {
     return this.request<{ approved: boolean; autoEnforced: boolean; requiresHumanReview: boolean; advisoryOnly: boolean }>(`/api/ai/decision`, {
       method: "POST", headers: this.headers(), body: JSON.stringify({ kind, output: output ?? {} }),
-    });
-  }
-  aiKillSwitch(disabled: boolean, reason = "") {
-    return this.request<{ disabled: boolean }>(`/api/admin/ai/kill-switch`, {
-      method: "POST", headers: this.headers(), body: JSON.stringify({ disabled, reason }),
     });
   }
   aiAudit() {
@@ -483,7 +631,7 @@ export function friendlyError(e: unknown, locale: "bg" | "en" = "bg"): string {
     const d = typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail);
     const map: Record<number, Record<string, string>> = {
       400: { bg: `Невалидна заявка: ${d}`, en: `Bad request: ${d}` },
-      401: { bg: "Липсва или грешен API токен. Проверете NEXT_PUBLIC settings / API_SHARED_TOKEN.", en: "Missing or invalid API token. Check NEXT_PUBLIC settings / API_SHARED_TOKEN." },
+      401: { bg: `Липсва или грешен API токен (${d}). Влезте с операторския токен от hybridpay-test Secret-а.`, en: `Missing or invalid API token (${d}). Sign in with the operator token from the hybridpay-test Secret.` },
       409: { bg: "Дублирана операция с различен payload (idempotency конфликт). Сменете ключа.", en: "Duplicate operation with different payload (idempotency conflict). Change the key." },
       410: { bg: "QR/офертата е изтекла или подправена. Създайте нова.", en: "QR/quote expired or tampered. Create a new one." },
       422: { bg: `Валидацията отказа: ${d}. Всичко е в sandbox — няма реални пари.`, en: `Validation refused: ${d}. Sandbox only — no real money.` },

@@ -38,7 +38,7 @@ export function useSession() {
   return {
     modal, tenant, setTenant, token, role, refreshRole,
     tokenInput, setTokenInput,
-    signIn: (raw: string) => { setToken(raw); setTokenInput(""); },
+    signIn: (raw: string) => { setToken(raw.trim()); setTokenInput(""); },
     logout: () => { setToken(""); setTokenInput(""); setRole("—"); },
   };
 }

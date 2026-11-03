@@ -54,8 +54,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype or "application/octet-stream")
 
     def _proxy_api(self):
-        # The static site is built with NEXT_PUBLIC_MODAL_API_URL=/api, so the
-        # SDK calls /api/<backend-path> — except health(), which calls /health.
+        # The static site is built with NEXT_PUBLIC_MODAL_API_URL=<backend-origin>,
+        # so browser SDK calls go to the backend directly (cross-origin, CORS
+        # allow-listed). This same-origin proxy additionally serves manual
+        # curl/browser checks against the frontend URL itself: the SDK paths
+        # already start with /api, so the incoming path IS the backend path
+        # (no prefix stripping — a base URL of "/api" would double-prefix to
+        # /api/api/... and 404).
         backend_path = "/health" if self.path == "/api/health" else self.path
         url = BACKEND_URL + backend_path
         # Allowlist ONLY the headers the backend needs. Everything else —

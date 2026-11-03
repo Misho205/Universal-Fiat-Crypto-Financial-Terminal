@@ -81,6 +81,31 @@ def test_rbac_matrix_money_paths():
                   json={"actor": "x", "role": "party"}, headers=OP).status_code == 403
 
 
+def test_fiat_simulate_auth_gates():
+    """POST /api/payments/fiat/simulate: 401 without/with-wrong token, 201 for operator.
+
+    Regression test for the simulator 401: an unsigned request must fail closed
+    with 401 (never 403/500), and a signed operator request must succeed. The
+    module fixture configures API_SHARED_TOKEN/API_ADMIN_TOKEN so the real
+    bearer gates run (not the bare-local-dev bypass).
+    """
+    c = _client()
+    body = {"amountMinor": "1000", "instructionId": "gate-1", "currency": "EUR"}
+    no_auth = c.post("/api/payments/fiat/simulate", json=body,
+                     headers={"X-Tenant-Id": TENANT, "Idempotency-Key": "g1"})
+    assert no_auth.status_code == 401
+    assert no_auth.json()["detail"] == "missing bearer token"
+    wrong = c.post("/api/payments/fiat/simulate", json=body,
+                   headers={"X-Tenant-Id": TENANT, "Authorization": "Bearer wrong",
+                            "Idempotency-Key": "g2"})
+    assert wrong.status_code == 401
+    assert wrong.json()["detail"] == "invalid token"
+    ok = c.post("/api/payments/fiat/simulate", json=body,
+                headers={**OP, "Idempotency-Key": "g3"})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["sandbox"] is True
+
+
 def test_dashboard_summary_and_recent_filters():
     c = _client()
     _seed(c)

@@ -69,7 +69,41 @@ SDK_HINTS = {
     "/api/admin/emergency": ["/api/admin/emergency"],
     "/api/admin/emergency/{emergency_id}/review": ["emergencyReview"],
     "/api/admin/audit": ["/api/admin/audit"],
+    "/api/admin/ai/features": ["/api/admin/ai/features"],
     "/ready": ["/api/ready", "/ready"],
+    # --- session tranches: rights, PDP, bindings, break-glass, disputes, audit ---
+    "/api/contracts/programmable/{agreement_id}/amend": ["/amend"],
+    "/api/rights/restrictions": ["/api/rights/restrictions"],
+    "/api/rights/restrictions/{restriction_id}/lift": ["/lift"],
+    "/api/rights/appeals": ["/api/rights/appeals"],
+    "/api/rights/appeals/{appeal_id}/review": ["appeals/", "/review"],
+    "/api/rights/appeals/{appeal_id}/decide": ["appeals/", "/decide"],
+    "/api/rights/jurisdictions": ["/api/rights/jurisdictions"],
+    "/api/rights/jurisdictions/{jurisdiction_id}/legal-review": ["/legal-review"],
+    "/api/rights/me": ["/api/rights/me"],
+    "/api/rights/monitoring/abuse-signals": ["/abuse-signals"],
+    "/api/pdp/decisions": ["/api/pdp/decisions"],
+    "/api/pdp/simulate": ["/api/pdp/simulate"],
+    "/api/pdp/policy-version": ["/api/pdp/policy-version"],
+    "/api/approvals/bindings": ["/api/approvals/bindings"],
+    "/api/approvals/bindings/{binding_id}": ["encodeURIComponent(bindingId)"],
+    "/api/approvals/bindings/{binding_id}/approve": ["bindings/", "/approve"],
+    "/api/breakglass/sessions": ["/api/breakglass/sessions"],
+    "/api/breakglass/sessions/{session_id}/approve": ["breakglass/sessions/", "/approve"],
+    "/api/breakglass/sessions/{session_id}/extend": ["breakglass/sessions/", "/extend"],
+    "/api/breakglass/sessions/{session_id}/revoke": ["breakglass/sessions/", "/revoke"],
+    "/api/breakglass/sessions/{session_id}/review": ["breakglass/sessions/", "/review"],
+    "/api/breakglass/actions": ["/api/breakglass/actions"],
+    "/api/breakglass/notifications": ["/api/breakglass/notifications"],
+    "/api/disputes": ["/api/disputes"],
+    "/api/disputes/{case_id}": ["encodeURIComponent(caseId)"],
+    "/api/disputes/{case_id}/evidence": ["/evidence"],
+    "/api/disputes/{case_id}/review": ["disputes/", "/review"],
+    "/api/disputes/{case_id}/decide": ["disputes/", "/decide"],
+    "/api/disputes/{case_id}/close": ["disputes/", "/close"],
+    "/api/audit/events": ["/api/audit/events"],
+    "/api/audit/verify": ["/api/audit/verify"],
+    "/api/audit/export": ["/api/audit/export"],
 }
 
 # snapshot path -> token that must appear in probe_live.py. Parameterized paths
@@ -94,6 +128,22 @@ PROBE_HINTS = {
     "/api/approvals/intents/{intent_id}": ["/api/approvals/intents/"],
     "/api/approvals/intents/{intent_id}/approve": ["/approve"],
     "/api/admin/emergency/{emergency_id}/review": ["/review"],
+    "/api/contracts/programmable/{agreement_id}/amend": ["/amend"],
+    "/api/approvals/bindings/{binding_id}": ["/api/approvals/bindings/"],
+    "/api/approvals/bindings/{binding_id}/approve": ["/approve"],
+    "/api/breakglass/sessions/{session_id}/approve": ["/approve"],
+    "/api/breakglass/sessions/{session_id}/extend": ["/extend"],
+    "/api/breakglass/sessions/{session_id}/revoke": ["/revoke"],
+    "/api/breakglass/sessions/{session_id}/review": ["/review"],
+    "/api/rights/appeals/{appeal_id}/review": ["/review"],
+    "/api/rights/appeals/{appeal_id}/decide": ["/decide"],
+    "/api/rights/jurisdictions/{jurisdiction_id}/legal-review": ["/legal-review"],
+    "/api/rights/restrictions/{restriction_id}/lift": ["/lift"],
+    "/api/disputes/{case_id}": ["/api/disputes/"],
+    "/api/disputes/{case_id}/evidence": ["/evidence"],
+    "/api/disputes/{case_id}/review": ["/review"],
+    "/api/disputes/{case_id}/decide": ["/decide"],
+    "/api/disputes/{case_id}/close": ["/close"],
 }
 
 
@@ -102,7 +152,7 @@ def _all_paths() -> set[str]:
 
 
 def test_snapshot_matches_live_count():
-    assert len(_all_paths()) == 53, f"snapshot drift: {len(_all_paths())} paths"
+    assert len(_all_paths()) == 86, f"snapshot drift: {len(_all_paths())} paths"
 
 
 def test_every_path_exercised_by_probe():

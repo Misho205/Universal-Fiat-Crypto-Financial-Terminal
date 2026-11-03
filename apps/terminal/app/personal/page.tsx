@@ -47,6 +47,8 @@ export default function PersonalPage() {
       />
       <SectionNav label="Personal sections" sections={SECTIONS} value={view} onChange={(v) => setView(v as View)} />
       <TenantRoleStrip tenant={s.tenant} role={s.role} isAdmin={s.role === "admin"} />
+      {!s.token && <PersonalSignIn
+        tokenInput={s.tokenInput} setTokenInput={s.setTokenInput} onSign={() => s.signIn(s.tokenInput)} />}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="text-sm font-semibold">{t("Тенант", "Tenant")}: <input value={s.tenant} onChange={(e) => s.setTenant(e.target.value)} autoComplete="off" className="rounded-[10px] border border-line bg-surface px-3 py-2" /></label>
@@ -76,13 +78,28 @@ export default function PersonalPage() {
 }
 
 /* ---------- 1. Personal Dashboard ---------- */
+function PersonalSignIn({ tokenInput, setTokenInput, onSign }: {
+  tokenInput: string; setTokenInput: (v: string) => void; onSign: () => void;
+}) {
+  return (
+    <Alert tone="warn" className="ws-gate">
+      <span className="font-semibold">Sign in to load your data — dashboard, history and payments need the operator token.</span>
+      <span className="mt-2 flex flex-wrap gap-2">
+        <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)}
+          placeholder="operator token" aria-label="Operator token" autoComplete="off" className="ws-gate-input" />
+        <Button size="sm" onClick={() => { onSign(); setTokenInput(""); }}>Sign in</Button>
+      </span>
+    </Alert>
+  );
+}
+
 function PersonalDash({ modal, locale }: { modal: ModalBackendClient; locale: "bg" | "en" }) {
   const [sum, setSum] = React.useState<null | { fiat: { total: number }; evm: { total: number }; agreements: { total: number } }>(null);
   const [err, setErr] = React.useState("");
   React.useEffect(() => {
     modal.dashboardSummary().then(
       (r) => setSum(r.data as typeof sum),
-      (e) => setErr(e instanceof Error ? e.message : String(e)),
+      (e) => setErr(friendlyError(e, locale)),
     );
   }, [modal]);
   const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
@@ -213,7 +230,7 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
 
 /* ---------- 3. Receive ---------- */
 function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "bg" | "en" }) {
-  const [to, setTo] = React.useState("0x0000000000000000000000000000000000000000");
+  const [to, setTo] = React.useState("");
   const [out, setOut] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [pid, setPid] = React.useState("");
@@ -245,7 +262,7 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
   return (
     <SectionCard title={t("Получи плащане (Sepolia заявка)", "Receive payment (Sepolia request)")}
       hint={t("Създава проследима Sepolia заявка. Подписването става във ВАШИЯ портфейл — ние не искаме seed/ключове.", "Creates a tracked Sepolia request. Signing happens in YOUR wallet — we never ask for seeds/keys.")}>
-      <Field label={t("Ваш Sepolia адрес (0x…)", "Your Sepolia address (0x…)")}><Input value={to} onChange={(e) => setTo(e.target.value)} /></Field>
+      <Field label={t("Ваш Sepolia адрес (0x…)", "Your Sepolia address (0x…)")}><Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="0x…" /></Field>
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy} onClick={create}>{t("Създай заявка", "Create request")}</Button>
         <Button variant="secondary" disabled={!pid} onClick={track}>{t("Проследи", "Track")}</Button>
