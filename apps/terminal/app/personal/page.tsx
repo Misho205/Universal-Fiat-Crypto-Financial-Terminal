@@ -232,18 +232,20 @@ function SendWizard({ modal, locale }: { modal: ModalBackendClient; locale: "bg"
 function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "bg" | "en" }) {
   const [to, setTo] = React.useState("");
   const [out, setOut] = React.useState("");
+  const [err, setErr] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [pid, setPid] = React.useState("");
   const [auto, setAuto] = React.useState(false);
   const t = (bg: string, en: string) => (locale === "bg" ? bg : en);
   async function create() {
-    setBusy(true); setOut("");
+    setBusy(true); setOut(""); setErr("");
     try {
-      const r = await modal.evmRequest({ to, valueWei: "1000000000000000000", chainId: 11155111 }, `ui-recv-${Date.now()}`);
+      // 0.001 Sepolia ETH in wei (16 digits — must satisfy minor-units validation).
+      const r = await modal.evmRequest({ to, valueWei: "1000000000000000", chainId: 11155111 }, `ui-recv-${Date.now()}`);
       const d = r.data as { paymentId: string; to: string; valueWei: string; explorerBase: string };
       setPid(d.paymentId);
       setOut(`${t("Споделете", "Share")}: paymentId=${d.paymentId} → ${d.to} (${d.valueWei} wei, Sepolia)\nExplorer: ${d.explorerBase}… (hash идва след подписване в портфейла)`);
-    } catch (e) { setOut(friendlyError(e, locale)); }
+    } catch (e) { setErr(friendlyError(e, locale)); }
     finally { setBusy(false); }
   }
   async function track() {
@@ -251,8 +253,9 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
     try {
       const r = await modal.evmStatus(pid);
       const d = r.data as { state: string; confirmations: number; confirmationsRequired: number; txHash: string; explorer: string | null; note: string };
+      setErr("");
       setOut(`${d.state} ${d.confirmations}/${d.confirmationsRequired} · ${d.txHash || t("чака подпис в портфейла", "awaiting wallet signature")}${d.explorer ? `\n${d.explorer}` : ""}\n${d.note ?? ""}`);
-    } catch (e) { setOut(friendlyError(e, locale)); }
+    } catch (e) { setErr(friendlyError(e, locale)); }
   }
   const live = usePolling(async () => {
     if (!pid) return null;
@@ -278,6 +281,7 @@ function ReceivePanel({ modal, locale }: { modal: ModalBackendClient; locale: "b
         </div>
       )}
       {live.error && <p className="mt-1 text-sm text-[rgb(var(--danger))]">{live.error} <button className="underline" onClick={live.reset}>{t("Опитай отново", "Retry")}</button></p>}
+      {err && <div className="mt-2"><Alert tone="danger">{err}</Alert></div>}
       {out && <pre className="ok mt-2">{out}</pre>}
       <p className="muted mt-2 text-xs">{t("Фиат заявките не са налични като backend примитив (виж пропуските) — ползвайте EVM заявка или QR касата.", "Fiat requests are not a backend primitive (see gaps) — use an EVM request or the QR checkout.")}</p>
     </SectionCard>

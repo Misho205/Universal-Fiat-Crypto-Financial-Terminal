@@ -1,0 +1,25 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, MarginL, MarginR, MarginV, Alignment, WrapStyle
+Style: Default,DejaVu Sans,20,&HFFFFFF,&H80000000,1,1,60,60,30,2,2
+[Events]
+Format: Layer, Start, End, Style, Text
+Dialogue: 0,0:00:04.00,0:00:07.92,Default,Meet HybridPay — a universal fiat and crypto payment terminal.
+Dialogue: 0,0:00:07.92,0:00:16.72,Default,One sandbox for banks, wallets, and smart contracts, where deterministic backend rules authorize every movement, and everything is audited.
+Dialogue: 0,0:00:16.72,0:00:23.74,Default,The Banking Workspace shows live KPIs, programmable contracts, disputes, and an admin-gated control plane.
+Dialogue: 0,0:00:23.74,0:00:29.03,Default,Operators read; money movement needs an admin token plus maker-checker approval.
+Dialogue: 0,0:00:29.03,0:00:37.37,Default,In the Personal Workspace I sign in with an operator token that lives only in browser memory, then send one thousand minor units.
+Dialogue: 0,0:00:37.37,0:00:41.44,Default,Create, then confirm: the provider decides, never the frontend.
+Dialogue: 0,0:00:41.44,0:00:50.99,Default,The simulator proves failures are first-class: a declined payment returns a structured provider decline, recorded as scenario passed, payment declined.
+Dialogue: 0,0:00:50.99,0:00:55.79,Default,Timeouts stay ambiguous, contracts validate — never confused with an outage.
+Dialogue: 0,0:00:55.79,0:01:03.34,Default,Money with conditions: a plain-words agreement becomes a validated programmable contract, activated by its creator.
+Dialogue: 0,0:01:03.34,0:01:08.39,Default,Guardrails never sleep — unknown categories rejected, wrong networks refused.
+Dialogue: 0,0:01:08.39,0:01:12.40,Default,The Meta Muse Spark integration advises only — never authorizes.
+Dialogue: 0,0:01:12.40,0:01:21.06,Default,Every answer arrives labeled advisory-only; here it runs as a transparent sandbox stub, while real keys stay server-side in Modal Secrets.
+Dialogue: 0,0:01:21.06,0:01:27.25,Default,History is tenant-isolated and searchable, with downloadable sandbox receipts for every record.
+Dialogue: 0,0:01:27.25,0:01:33.63,Default,The Private Workspace mirrors banking sign-in: role badges, tenant context, and a health-checked backend.
+Dialogue: 0,0:01:33.63,0:01:41.53,Default,Receiving is Sepolia-only: a tracked request is created, and your own wallet signs — the terminal never sees keys.
+Dialogue: 0,0:01:41.53,0:01:44.16,Default,Sandbox today, trusted rails tomorrow.

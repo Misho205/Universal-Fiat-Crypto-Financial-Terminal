@@ -13,3 +13,7 @@ next-env.d.ts
 data/
 *.db
 *.sqlite3
+
+demo-video/clips/
+demo-video/audio/
+demo-video/segs/

@@ -43,6 +43,16 @@ export default function Home() {
     try { const r = await modal.me(); setRole((r.data as { role: string }).role); }
     catch { setRole("unreachable"); }
   }
+  // Sign in with a FRESH client: `modal` in the click closure is stale
+  // (pre-sign-in, tokenless), so refreshRole() alone would keep role anonymous.
+  async function signInFresh() {
+    const v = tokenInput.trim();
+    setToken(v); setTokenInput("");
+    try {
+      const r = await new ModalBackendClient({ baseUrl: MODAL_URL, tenantId: tenant, token: v || undefined }).me();
+      setRole((r.data as { role: string }).role);
+    } catch { setRole("unreachable"); }
+  }
 
   // order state (existing flow, now via SDK + full states)
   const [amount, setAmount] = useState("10.00");
@@ -190,7 +200,7 @@ export default function Home() {
           <label>{t.tokenLabel}: <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} autoComplete="off" placeholder={token ? "••••••" : ""} /></label>
         </div>
         <div style={{ marginTop: 8 }}>
-          <button style={btnPrimary} onClick={() => { setToken(tokenInput.trim()); setTokenInput(""); refreshRole(); }}>{t.signIn}</button>
+          <button style={btnPrimary} onClick={signInFresh}>{t.signIn}</button>
           <button style={btnGhost} onClick={() => { setToken(""); setTokenInput(""); setRole("—"); }}>{t.logout}</button>
           <span style={{ marginLeft: 8 }}>{t.roleLabel}: <code>{role}</code>{role === "admin" ? "" : role === "operator" ? " (money movement needs admin)" : ""}</span>
         </div>
