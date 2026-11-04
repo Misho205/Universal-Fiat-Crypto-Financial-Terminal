@@ -1,0 +1,91 @@
+1
+00:00:06,000 --> 00:00:10,470
+Meet HybridPay — a universal fiat and crypto payment terminal.
+
+2
+00:00:10,470 --> 00:00:17,250
+Fiat rails, crypto wallets, and programmable money live in separate tools with separate rules.
+
+3
+00:00:17,250 --> 00:00:26,270
+HybridPay unifies them in one sandbox, where deterministic backend rules authorize every movement, and everything is audited.
+
+4
+00:00:26,270 --> 00:00:35,490
+The Banking Workspace is the operator's control plane: live KPIs, programmable contracts, disputes, and an admin-gated panel.
+
+5
+00:00:35,490 --> 00:00:42,270
+Operators read and monitor; money movement needs an admin token plus maker-checker approval.
+
+6
+00:00:42,270 --> 00:00:48,890
+In the Personal Workspace I sign in with an operator token that lives only in browser memory.
+
+7
+00:00:48,890 --> 00:00:53,090
+Then I send one thousand minor units: create, then confirm.
+
+8
+00:00:53,090 --> 00:01:02,840
+The backend provider decides, never the frontend — and the result comes back authorized, with a payment identifier and a sandbox receipt.
+
+9
+00:01:02,840 --> 00:01:13,370
+The simulator proves failures are first-class: a declined payment returns a structured provider decline — scenario passed, payment declined.
+
+10
+00:01:13,370 --> 00:01:15,850
+Timeouts stay honestly ambiguous.
+
+11
+00:01:15,850 --> 00:01:20,510
+A decline is an expected business outcome, and a passing test.
+
+12
+00:01:20,510 --> 00:01:27,380
+Money with conditions: a plain-words agreement becomes a validated programmable contract.
+
+13
+00:01:27,380 --> 00:01:33,330
+Guardrails never sleep — unknown categories rejected, wrong networks refused.
+
+14
+00:01:33,330 --> 00:01:38,740
+And no AI recommendation can bypass deterministic authorization rules.
+
+15
+00:01:38,740 --> 00:01:45,160
+At the center is the Meta Muse Spark integration — it advises only, never authorizes.
+
+16
+00:01:45,160 --> 00:01:48,410
+Every answer arrives labeled advisory-only.
+
+17
+00:01:48,410 --> 00:01:55,520
+Here it runs as a transparent sandbox stub, while real keys stay server-side in Modal Secrets.
+
+18
+00:01:55,520 --> 00:02:01,870
+Policy first, AI second — approval always stands between a suggestion and any funds.
+
+19
+00:02:01,870 --> 00:02:11,800
+History is tenant-isolated and searchable, with downloadable sandbox receipts for every record — the audit trail behind every payment state.
+
+20
+00:02:11,800 --> 00:02:21,910
+Security is architecture: role-based access, independent policy enforcement, idempotency keys, human approvals, tenant isolation.
+
+21
+00:02:21,910 --> 00:02:26,070
+The Private Workspace mirrors the same sign-in model.
+
+22
+00:02:26,070 --> 00:02:35,200
+Receiving is Sepolia-only: a tracked request is created, and your own wallet signs — the terminal never sees keys.
+
+23
+00:02:35,200 --> 00:02:38,970
+Sandbox today, trusted infrastructure tomorrow.
