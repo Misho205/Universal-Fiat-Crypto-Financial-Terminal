@@ -70,6 +70,51 @@ def test_h02_rate_limit_429_with_retry_after_and_health_exempt(monkeypatch):
     api_mod._rate_buckets.clear()
 
 
+# --- M-04: webhook signature-as-authentication ----------------------------------
+def _wh_sign(secret: str, body: bytes, ts: int) -> str:
+    import hashlib as _hl
+    import hmac as _hm
+    v1 = _hm.new(secret.encode(), f"{ts}.".encode() + body, _hl.sha256).hexdigest()
+    return f"t={ts},v1={v1}"
+
+
+def test_m04_webhook_accepts_signature_only_rejects_unsigned(monkeypatch):
+    """Genuine Stripe sends no bearer: valid signature alone must be accepted;
+    missing/invalid signatures must fail closed — bearer or not."""
+    import importlib
+    import json as _json
+    import time as _time
+
+    import modal_backend.config as cfg
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET_TEST", "whsec_m04")
+    importlib.reload(cfg)
+    try:
+        _admin(monkeypatch)
+        c = _client()
+        event = {"id": "evt_m04_a", "type": "payment_intent.succeeded",
+                 "data": {"object": {"id": "mock_whref_m04"}}}
+        raw = _json.dumps(event).encode()
+        ts = int(_time.time())
+        sig = _wh_sign("whsec_m04", raw, ts)
+        ct = {"Content-Type": "application/json", "stripe-signature": sig}
+        # 1. Signature only, no bearer (genuine provider delivery) -> accepted.
+        r = c.post("/api/webhooks/stripe", content=raw, headers=ct)
+        assert r.status_code == 200, r.text
+        # 2. Same event replays -> deduped (idempotent ingest preserved).
+        assert c.post("/api/webhooks/stripe", content=raw, headers=ct).json().get("deduped") is True
+        # 3. Invalid bearer + valid signature -> still accepted as provider delivery.
+        r2 = c.post("/api/webhooks/stripe", content=raw,
+                    headers={**ct, "Authorization": "Bearer wrong-token"})
+        assert r2.status_code == 200, r2.text
+        # 4. No signature at all -> 401, with and without bearer.
+        assert c.post("/api/webhooks/stripe", content=raw,
+                      headers={"Content-Type": "application/json"}).status_code == 401
+        assert c.post("/api/webhooks/stripe", content=raw,
+                      headers={**H, "Content-Type": "application/json"}).status_code == 401
+    finally:
+        monkeypatch.delenv("STRIPE_WEBHOOK_SECRET_TEST", raising=False)
+        importlib.reload(cfg)
+
 # --- M-06: tokenless-mode startup warning --------------------------------------
 def test_m06_tokenless_mode_warns_on_startup():
     """Fresh interpreter without API_*_TOKEN must log the dev-mode warning

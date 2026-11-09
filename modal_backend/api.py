@@ -887,8 +887,17 @@ async def fiat_refund(payment_id: str, body: FiatRefundIn, tenant: str = Depends
 
 
 @app.post("/api/webhooks/stripe")
-async def stripe_webhook(request: Request, caller: str = Depends(require_auth)) -> dict[str, Any]:
-    """Verified Stripe webhook: signature-checked, idempotent, authoritative state source."""
+async def stripe_webhook(request: Request,
+                         authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Verified Stripe webhook: signature-checked, idempotent, authoritative state source.
+
+    Authentication is the HMAC webhook signature (industry standard —
+    genuine Stripe deliveries carry no bearer token, so none is required).
+    A bearer token, when present AND valid, only selects the audit caller
+    label; it never overrides or weakens signature verification. An invalid
+    bearer with a valid signature is accepted as a provider delivery.
+    Missing/invalid signatures fail closed (401/410) — unchanged.
+    """
     raw = await request.body()
     sig = request.headers.get("stripe-signature", "")
     secret = config.STRIPE_WEBHOOK_SECRET_TEST
@@ -899,6 +908,8 @@ async def stripe_webhook(request: Request, caller: str = Depends(require_auth)) 
         raise HTTPException(status_code=code, detail=f"{exc.code}: {exc}") from exc
     if not event["id"]:
         raise HTTPException(status_code=422, detail="bad event")
+    role = role_of(authorization)
+    caller = "service-caller" if role else "stripe-webhook"
     dedupe_key = f"wh:stripe:{event['id']}"
     if store.idem_lookup(dedupe_key):
         return {"received": True, "deduped": True}

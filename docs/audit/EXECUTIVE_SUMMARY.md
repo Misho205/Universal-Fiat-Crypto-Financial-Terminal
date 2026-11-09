@@ -12,8 +12,9 @@
   Modal CORS is explicit, simulator fallback is opt-in only, AUTHORIZED/
   DECLINED mapping is a single tested function.
 - **No CRITICAL findings.** 2 HIGH fixed + verified (NestJS open CORS;
-  missing general rate limiting). 6 MEDIUM (2 fixed, 1 partially fixed,
-  3 deferred with rationale), 5 LOW accepted.
+  missing general rate limiting). 6 MEDIUM (3 fixed: webhook signature-auth,
+  canonical idempotency, tokenless warning; 1 partially fixed via overrides;
+  2 deferred with rationale), 5 LOW accepted.
 - **Enterprise readiness: NOT READY** — expected for a prototype. 24 gaps
   registered (8 need external counsel first); roadmap gates defined.
 
@@ -24,14 +25,14 @@
 | EU_APPLICABILITY_MATRIX (GDPR appl.; DORA/MiCA/PSD2/TFR/AML conditional; PCI/eIDAS/NIS2 n/a-or-conditional; AI Act partial) | IMPLEMENTED (counsel review REQUIRED) |
 | REGULATORY_GAP_REGISTER (24) / LEGAL_REVIEW_QUESTIONS (8) | IMPLEMENTED (evidence-gated) |
 | SECURITY_FINDINGS (0 crit / 2 high fixed / 6 med / 5 low) | VERIFIED |
-| Remediation H-01, H-02, M-05, M-06, postcss/multer | IMPLEMENTED + tests green |
-| M-01 (image pins), M-03 (vitest 4.x), M-04 (webhook auth) | NOT IMPLEMENTED (deferred, rationale filed) |
+| Remediation H-01, H-02, M-04, M-05, M-06, postcss/multer | IMPLEMENTED + tests green |
+| M-01 (image pins), M-03 (vitest 4.x) | NOT IMPLEMENTED (deferred, rationale filed) |
 | Scaffolds (DSR, retention, incident, CI, correlation IDs) | PARTIAL (drafts, NOT operational) |
 | Live E2E / Stripe-TEST / Sepolia-RPC / full-turbo / SAST | NOT TESTED (limits in TEST_EVIDENCE.md) |
 | Any compliance/certification/authorization claim | REQUIRES EXTERNAL REVIEW (never claimed) |
 
 ## Test evidence (actual runs, this branch)
-222 passed / 4 skipped (backend) · 8 passed (api, incl. new CORS test) ·
+223 passed / 4 skipped (backend) · 8 passed (api, incl. new CORS test) ·
 43 passed (terminal) · `next build` OK · `tsc` clean · E2E mock flow OK ·
 `pnpm audit` 10→5 (rest dev-only) · CycloneDX python SBOM emitted.
 

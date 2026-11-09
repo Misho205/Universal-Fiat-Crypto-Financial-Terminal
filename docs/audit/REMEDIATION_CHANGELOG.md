@@ -58,6 +58,22 @@
 - Verified: `pnpm audit` 10 → 5 vulns; terminal `next build` OK; api 8/8 tests pass.
 - Residual: LOW — remaining 5 vulns are vitest-3 dev-only (see deferred M-03).
 
+### M-04 — Webhook bearer requirement → signature-as-authentication (MEDIUM)
+- Root cause: `stripe_webhook` demanded `require_auth`, but genuine Stripe
+  deliveries carry no bearer token — webhook liveness failed whenever API
+  tokens were configured.
+- Fix: bearer made optional; HMAC-SHA256 signature + 300 s tolerance + raw-body
+  + `stripe:{event.id}` dedupe unchanged and mandatory (fail closed 401/410).
+  Valid bearer only labels the audit caller (`service-caller` vs
+  `stripe-webhook`); invalid bearer never overrides a valid signature.
+  Unauthenticated probing is additionally throttled by the H-02 limiter.
+- Files: `modal_backend/api.py`, `test_remediation_audit_fixes.py`
+  (`test_m04_...`: signature-only 200, replay deduped, wrong-bearer+valid-sig
+  200, unsigned 401 with and without bearer).
+- Verified: new test + all pre-existing webhook tests green (19 passed).
+- Residual: LOW — rotate `STRIPE_WEBHOOK_SECRET_TEST` per environment; monitor
+  401-rate on the endpoint for probing.
+
 ## Deferred (not implemented on this branch)
 
 - **M-01 starlette/fastapi pins**: not exploitable here (no `request.url`
@@ -66,8 +82,7 @@
 - **M-03 vitest 3.2.7 (tinypool/mocker)**: dev-only; fix requires vitest 4.x
   major migration across 7 packages (config-breakage risk). Accepted residual
   with mitigation (CI-local execution, no production artifact); roadmap.
-- **M-04 webhook bearer-auth**: signature verification is correct; changing
-  auth posture needs explicit approval (rule 8). Recommendation in roadmap.
+- **M-04 webhook bearer-auth**: implemented above (was deferred pending approval).
 - **pytest 8.3.4 advisory**: dev-only local; bundle with Modal image upgrade.
 
 ## Reverted / no-op

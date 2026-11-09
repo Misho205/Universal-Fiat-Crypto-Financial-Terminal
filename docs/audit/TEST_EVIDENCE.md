@@ -6,15 +6,15 @@
 
 ## 1. Backend suite (FastAPI sandbox)
 - Command: `API_SHARED_TOKEN=dev-shared-token API_ADMIN_TOKEN=dev-admin-token python3 -m pytest modal_backend/ -q -p no:cacheprovider`
-- Final result: **222 passed, 4 skipped** (16.01 s). Intermediate run during
+- Final result: **223 passed, 4 skipped** (16.13 s). Intermediate run during
   remediation: 221 passed + 1 failed (M-06 assertion looked in stderr; warning
   is emitted on stdout — test corrected, full suite re-run green).
 - Skips (4, pre-existing): optional live-integration tests requiring
   `RUN_META_INTEGRATION=1` / `RUN_SEPOLIA_RPC_TEST=1` + real keys/RPC —
   correctly skipped in sandbox.
-- Includes new `test_remediation_audit_fixes.py` (4 tests: H-02 429/Retry-After/
-  health-exempt, M-05 order-independence + no-duplicate replay, M-06
-  tokenless-warning subprocess).
+- Includes new `test_remediation_audit_fixes.py` (5 tests: H-02 429/Retry-After/
+  health-exempt, M-04 signature-only webhook + unsigned rejection, M-05
+  order-independence + no-duplicate replay, M-06 tokenless-warning subprocess).
 
 ## 2. NestJS API (`@hybridpay/api`)
 - Command: `pnpm --filter @hybridpay/api test` → **2 files, 8 tests passed**

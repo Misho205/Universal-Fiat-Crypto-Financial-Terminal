@@ -54,15 +54,17 @@ targeted grep/read verification of auth, CORS, SQL, XSS, SSRF, secrets.
   no production runtime path.
 - Status: **fix in Phase 4 if green** (vitest 3.x latest; major 4.x only if tests pass, else pin + roadmap).
 
-### M-04 — Stripe webhook endpoint requires bearer auth
-- Location: `api.py:826` — `stripe_webhook(... require_auth)`.
-- Verified: signature HMAC + tolerance + dedupe are correct (`payments.py:177-198`,
-  raw body used). But with tokens configured, genuine Stripe deliveries (which
-  carry no bearer token) receive 401 — webhook liveness fails; with tokens
-  unset, `dev-caller` passthrough applies (local-only).
-- Action: **NOT changed in Phase 4** (auth posture change needs explicit
-  approval). Recommendation: signature-as-authentication with optional bearer,
-  replay dedupe retained; recorded in roadmap.
+### M-04 — Stripe webhook endpoint requires bearer auth → signature-as-authentication (MEDIUM, FIXED)
+- Location: `api.py` (`stripe_webhook`).
+- Was: `require_auth` blocked genuine Stripe deliveries (no bearer) when tokens
+  configured. Signature HMAC + tolerance + dedupe were already correct.
+- Fix: bearer optional; HMAC signature mandatory and unchanged (fail closed
+  401/410); valid bearer only selects the audit caller label, invalid bearer
+  never overrides a valid signature; unauthenticated probing additionally
+  covered by the H-02 rate limiter.
+- Verified: `test_m04_webhook_accepts_signature_only_rejects_unsigned`
+  (signature-only 200, replay deduped, wrong-bearer+valid-sig 200,
+  unsigned 401 ± bearer); pre-existing webhook tests unchanged and green.
 
 ### M-05 — `_idem_key` fallback hash uses non-canonical `str(body)`
 - Location: `api.py:560-562`.
