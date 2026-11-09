@@ -42,6 +42,19 @@ describe("tenancy + idempotency + devices", () => {
     expect(verifyCheckout(good).orderId).toBe("ord-1");
     await s.get(`/v1/checkout/${good}tampered`).expect(410);
   });
+describe("cors allow-list (H-01)", () => {
+  it("answers preflight for allowed origins only", async () => {
+    const s = request(app.getHttpServer());
+    const ok = await s.options("/v1/orders")
+      .set("Origin", "http://localhost:3000")
+      .set("Access-Control-Request-Method", "POST");
+    expect(ok.headers["access-control-allow-origin"]).toBe("http://localhost:3000");
+    const evil = await s.options("/v1/orders")
+      .set("Origin", "https://evil.example")
+      .set("Access-Control-Request-Method", "POST");
+    expect(evil.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
   it("concurrent reservations respect day limit", async () => {
     const s = request(app.getHttpServer());
     const o = await s.post("/v1/orders").set("X-Tenant-Id", "tenant-cap").set("Idempotency-Key", "cap-ord").send({ storeId: "s1", denomination: "fiat:EUR", totalMinor: "199000" }).expect(201);

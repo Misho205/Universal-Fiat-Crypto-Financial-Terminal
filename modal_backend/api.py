@@ -208,6 +208,64 @@ app.add_middleware(
 )
 
 
+# ---------- Conservative per-instance rate limiting (H-02) ----------
+# Fixed-window per client IP. Generous default (sandbox CI-friendly);
+# production deployments MUST lower RATE_LIMIT_PER_MIN (see
+# docs/modal-deploy-checklist.md) and run behind Modal concurrency limits.
+# /health and /ready stay exempt so orchestrators never lose signal.
+import threading as _rate_th
+
+_rate_lock = _rate_th.Lock()
+_rate_buckets: dict[str, list[float]] = {}  # ip -> [window_start_monotonic, count]
+
+
+def _rate_limit_per_min() -> int:
+    try:
+        return max(0, int(config._get("RATE_LIMIT_PER_MIN", "6000")))
+    except ValueError:
+        return 6000
+
+
+@app.middleware("http")
+async def _rate_limit_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    limit = _rate_limit_per_min()
+    if limit <= 0 or request.url.path in ("/health", "/ready"):
+        return await call_next(request)
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _rate_lock:
+        bucket = _rate_buckets.get(ip)
+        if bucket is None or now - bucket[0] >= 60.0:
+            _rate_buckets[ip] = [now, 1.0]
+            count = 1
+        else:
+            bucket[1] += 1.0
+            count = int(bucket[1])
+        # Opportunistic cleanup to bound memory.
+        if len(_rate_buckets) > 4096:
+            stale = [k for k, v in _rate_buckets.items() if now - v[0] >= 60.0]
+            for k in stale:
+                del _rate_buckets[k]
+    if count > limit:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "RATE_LIMITED: too many requests"},
+            headers={"Retry-After": "60"},
+        )
+    return await call_next(request)
+
+
+if not config.API_SHARED_TOKEN and not config.API_ADMIN_TOKEN:
+    # M-06: loud one-time warning — tokenless dev-caller mode must never be
+    # deployed to a shared network. Hard refusal would break the documented
+    # local quickstart, so this warns; the deploy checklist gates production.
+    logger.warning(
+        "auth.tokenless-dev-mode: no API_SHARED_TOKEN/API_ADMIN_TOKEN configured — "
+        "all requests are dev-caller with client-supplied X-Tenant-Id. "
+        "Set API_*_TOKEN + TENANT_FOR_*_TOKEN before any shared deployment."
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
     log_event(logger, "error.unhandled", error=str(exc)[:200])
@@ -558,8 +616,14 @@ def _public(response: dict[str, Any]) -> dict[str, Any]:
 
 
 def _idem_key(tenant: str, route: str, key: str | None, body: dict[str, Any]) -> str:
-    raw = f"{tenant}:{route}:{key or hashlib.sha256(str(body).encode()).hexdigest()}"
-    return raw
+    if key:
+        return f"{tenant}:{route}:{key}"
+    # No header key: hash a canonical JSON encoding (sorted keys, compact
+    # separators) so equivalent payloads map to the same key regardless of
+    # field order or SDK serialization. (Previously str(body) — fragile.)
+    import json as _json
+    canonical = _json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{tenant}:{route}:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
 
 @app.post("/api/payments/fiat/simulate", status_code=201)
